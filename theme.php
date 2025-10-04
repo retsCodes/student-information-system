@@ -4,17 +4,54 @@ if (!isset($_SESSION)) {
     session_start();
 }
 
-// Handle theme toggle
+// Handle theme toggle with persistence
 if (isset($_POST['toggle_theme'])) {
-    $_SESSION['theme'] = ($_SESSION['theme'] ?? 'light') === 'light' ? 'dark' : 'light';
+    $pdo = getDBConnection();
+    $new_theme = ($_SESSION['theme'] ?? 'light') === 'light' ? 'dark' : 'light';
+    $_SESSION['theme'] = $new_theme;
+    
+    // If user is logged in, save theme preference to database
+    if (isset($_SESSION['user_id'])) {
+        $stmt = $pdo->prepare("UPDATE users SET theme_preference = ? WHERE user_id = ?");
+        $stmt->execute([$new_theme, $_SESSION['user_id']]);
+    }
+    
+    // Also set a cookie for non-logged in users
+    setcookie('theme_preference', $new_theme, time() + (86400 * 30), "/"); // 30 days
+    
     header('Content-Type: application/json');
-    echo json_encode(['theme' => $_SESSION['theme']]);
+    echo json_encode(['theme' => $new_theme]);
     exit();
 }
 
-// Get current theme
+// Get current theme with persistence
 function getCurrentTheme() {
-    return $_SESSION['theme'] ?? 'light';
+    // If theme is already in session, use it
+    if (isset($_SESSION['theme'])) {
+        return $_SESSION['theme'];
+    }
+    
+    // If user is logged in, try to get theme from database
+    if (isset($_SESSION['user_id'])) {
+        $pdo = getDBConnection();
+        $stmt = $pdo->prepare("SELECT theme_preference FROM users WHERE user_id = ?");
+        $stmt->execute([$_SESSION['user_id']]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($result && $result['theme_preference']) {
+            $_SESSION['theme'] = $result['theme_preference'];
+            return $_SESSION['theme'];
+        }
+    }
+    
+    // If no theme in session or database, check cookie
+    if (isset($_COOKIE['theme_preference'])) {
+        $_SESSION['theme'] = $_COOKIE['theme_preference'];
+        return $_SESSION['theme'];
+    }
+    
+    // Default to light theme
+    return 'light';
 }
 
 // Theme toggle button HTML
