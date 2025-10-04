@@ -111,7 +111,13 @@ function renderPageStart($title, $role, $current_page = '') {
         <title>' . $title . ' - Student Information System</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+        <link href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+        <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+        <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+        <script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
         ' . getThemeCSS() . '
         <style>
         .main-content {
@@ -133,9 +139,48 @@ function renderPageStart($title, $role, $current_page = '') {
                 margin-left: 0;
             }
         }
+        /* Custom styles for confirmation buttons */
+        .btn-confirm {
+            border-radius: 4px;
+            font-weight: 500;
+            padding: 0.375rem 0.75rem;
+            transition: all 0.2s ease-in-out;
+        }
+        .btn-confirm:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        /* Override default confirm/alert styling */
+        .swal2-popup {
+            border-radius: 10px !important;
+        }
+        .swal2-confirm, .swal2-cancel {
+            border-radius: 4px !important;
+            font-weight: 500 !important;
+            padding: 0.5rem 1.5rem !important;
+        }
         </style>
     </head>
     <body class="' . getThemeClasses() . '">
+        <script>
+        // Override default confirm with SweetAlert2
+        window.originalConfirm = window.confirm;
+        window.confirm = function(message) {
+            return new Promise((resolve) => {
+                Swal.fire({
+                    text: message,
+                    icon: "question",
+                    showCancelButton: true,
+                    confirmButtonColor: "#3085d6",
+                    cancelButtonColor: "#d33",
+                    confirmButtonText: "Yes",
+                    cancelButtonText: "No"
+                }).then((result) => {
+                    resolve(result.isConfirmed);
+                });
+            });
+        };
+        </script>
         ' . renderHeader($title, $user_name, $user_role) . '
         ' . renderSidebar($role, $current_page) . '
         <div class="main-content">';
