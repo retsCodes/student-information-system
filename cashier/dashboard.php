@@ -8,6 +8,38 @@ requireRole('cashier');
 $pdo = getDBConnection();
 $user_id = $_SESSION['user_id'];
 
+// Add quick action links for new management features
+$quick_actions = [
+    [
+        'title' => 'Manage Subjects',
+        'icon' => 'fa-book',
+        'description' => 'Assign subjects to sections and students',
+        'url' => 'manage_subjects.php',
+        'color' => 'primary'
+    ],
+    [
+        'title' => 'Manage Sections',
+        'icon' => 'fa-users',
+        'description' => 'Assign students to sections',
+        'url' => 'manage_sections.php',
+        'color' => 'success'
+    ],
+    [
+        'title' => 'Process Payments',
+        'icon' => 'fa-money-bill-wave',
+        'description' => 'Record student payments',
+        'url' => 'payments.php',
+        'color' => 'info'
+    ],
+    [
+        'title' => 'Settings',
+        'icon' => 'fa-cog',
+        'description' => 'Manage your account settings',
+        'url' => 'settings.php',
+        'color' => 'secondary'
+    ]
+];
+
 // Get statistics
 $stats = [];
 
@@ -55,6 +87,66 @@ $stats['overdue_payments'] = $stmt->fetch()['total'];
 
 renderPageStart('Cashier Dashboard', 'cashier', 'dashboard.php');
 ?>
+
+<!-- Quick Action Cards -->
+<div class="container-fluid px-4 mb-4">
+    <div class="row">
+        <?php foreach ($quick_actions as $action): ?>
+            <div class="col-xl-3 col-md-6 mb-4">
+                <div class="card border-left-<?php echo $action['color']; ?> shadow h-100 py-2">
+                    <div class="card-body">
+                        <div class="row no-gutters align-items-center">
+                            <div class="col mr-2">
+                                <div class="text-xs font-weight-bold text-<?php echo $action['color']; ?> text-uppercase mb-1">
+                                    <?php echo htmlspecialchars($action['title']); ?>
+                                </div>
+                                <div class="h6 mb-0 text-gray-800">
+                                    <?php echo htmlspecialchars($action['description']); ?>
+                                </div>
+                            </div>
+                            <div class="col-auto">
+                                <i class="fas <?php echo $action['icon']; ?> fa-2x text-gray-300"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <a href="<?php echo $action['url']; ?>" class="stretched-link"></a>
+                </div>
+            </div>
+        <?php endforeach; ?>
+    </div>
+</div>
+
+<div class="container-fluid px-4 mb-4">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0"><i class="fas fa-tools"></i> Quick Links</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3 mb-2">
+                    <a href="student_search.php" class="btn btn-outline-primary w-100">
+                        <i class="fas fa-search"></i> Student Search
+                    </a>
+                </div>
+                <div class="col-md-3 mb-2">
+                    <a href="manage_subjects.php" class="btn btn-outline-warning w-100">
+                        <i class="fas fa-book"></i> Manage Subjects
+                    </a>
+                </div>
+                <div class="col-md-3 mb-2">
+                    <a href="manage_sections.php" class="btn btn-outline-success w-100">
+                        <i class="fas fa-users"></i> Manage Sections
+                    </a>
+                </div>
+                <div class="col-md-3 mb-2">
+                    <a href="../settings.php" class="btn btn-outline-secondary w-100">
+                        <i class="fas fa-cog"></i> Settings
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="row mb-4">
     <div class="col-12">
