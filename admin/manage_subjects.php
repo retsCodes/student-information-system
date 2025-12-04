@@ -42,6 +42,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             
                             logActivity($_SESSION['user_id'], 'Subject Created', "Created subject: {$subject_code} - {$subject_name}");
                             $success = 'Subject added successfully.';
+                            
+                            // Redirect to prevent form resubmission
+                            header("Location: manage_subjects.php?success=Subject+added+successfully");
+                            exit();
                         } catch(Exception $e) {
                             $error = 'Failed to add subject: ' . $e->getMessage();
                         }
@@ -68,12 +72,33 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         $stmt->execute([$subject_id]);
                         $old_subject = $stmt->fetch(PDO::FETCH_ASSOC);
                         
-                        $stmt = $pdo->prepare("UPDATE subjects SET subject_name = ?, units = ?, description = ? WHERE id = ?");
-                        $stmt->execute([$subject_name, $units, $description, $subject_id]);
-                        
-                        logActivity($_SESSION['user_id'], 'Subject Updated', 
-                                   "Updated subject {$old_subject['subject_code']}: name from '{$old_subject['subject_name']}' to '{$subject_name}', units from {$old_subject['units']} to {$units}");
-                        $success = 'Subject updated successfully.';
+                        if (!$old_subject) {
+                            $error = 'Subject not found.';
+                        } else {
+                            $stmt = $pdo->prepare("UPDATE subjects SET subject_name = ?, units = ?, description = ? WHERE id = ?");
+                            $stmt->execute([$subject_name, $units, $description, $subject_id]);
+                            
+                            // Log detailed changes
+                            $changes = [];
+                            if ($old_subject['subject_name'] != $subject_name) {
+                                $changes[] = "name from '{$old_subject['subject_name']}' to '{$subject_name}'";
+                            }
+                            if ($old_subject['units'] != $units) {
+                                $changes[] = "units from {$old_subject['units']} to {$units}";
+                            }
+                            if ($old_subject['description'] != $description) {
+                                $changes[] = "description updated";
+                            }
+                            
+                            $change_log = !empty($changes) ? implode(', ', $changes) : 'no changes detected';
+                            logActivity($_SESSION['user_id'], 'Subject Updated', 
+                                       "Updated subject {$old_subject['subject_code']}: {$change_log}");
+                            $success = 'Subject updated successfully.';
+                            
+                            // Redirect to prevent form resubmission
+                            header("Location: manage_subjects.php?success=Subject+updated+successfully");
+                            exit();
+                        }
                     } catch(Exception $e) {
                         $error = 'Failed to update subject: ' . $e->getMessage();
                     }
@@ -122,6 +147,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                 
                                 logActivity($_SESSION['user_id'], 'Subject Deleted', "Deleted subject: {$subject['subject_code']} - {$subject['subject_name']}");
                                 $success = 'Subject deleted successfully.';
+                                
+                                // Redirect to prevent form resubmission
+                                header("Location: manage_subjects.php?success=Subject+deleted+successfully");
+                                exit();
                             } catch(Exception $e) {
                                 $error = 'Failed to delete subject: ' . $e->getMessage();
                             }
@@ -133,12 +162,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 }
 
+// Check for success message from redirect
+if (isset($_GET['success'])) {
+    $success = str_replace('+', ' ', $_GET['success']);
+}
+
 // Get all subjects with section information
 $stmt = $pdo->query("SELECT s.*, 
                      (SELECT COUNT(*) FROM sections sec WHERE JSON_CONTAINS(s.sections, JSON_QUOTE(sec.section_code)) AND sec.status = 'active') as active_sections
                      FROM subjects s 
                      ORDER BY s.subject_code");
 $subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get unique subject names for filter
+$subject_names = array_unique(array_column($subjects, 'subject_name'));
+sort($subject_names);
 
 renderPageStart('Manage Subjects', 'admin', 'manage_subjects.php');
 ?>
@@ -162,6 +200,33 @@ renderPageStart('Manage Subjects', 'admin', 'manage_subjects.php');
     </div>
 <?php endif; ?>
 
+<!-- Filter Section -->
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">Filter Subjects</h5>
+        <form method="GET" class="row g-3">
+            <div class="col-md-6">
+                <label for="name_filter" class="form-label">Subject Name</label>
+                <select class="form-select" id="name_filter" name="name_filter" onchange="this.form.submit()">
+                    <option value="">All Subjects</option>
+                    <?php foreach($subject_names as $name): ?>
+                        <option value="<?php echo htmlspecialchars($name); ?>" 
+                            <?php echo (isset($_GET['name_filter']) && $_GET['name_filter'] === $name) ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($name); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">&nbsp;</label>
+                <div>
+                    <a href="manage_subjects.php" class="btn btn-secondary">Clear Filters</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Subjects Table -->
 <div class="card">
     <div class="card-body">
@@ -178,7 +243,18 @@ renderPageStart('Manage Subjects', 'admin', 'manage_subjects.php');
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach($subjects as $subject): ?>
+                    <?php 
+                    // Filter subjects if filter is applied
+                    $filtered_subjects = $subjects;
+                    if (isset($_GET['name_filter']) && !empty($_GET['name_filter'])) {
+                        $filter_name = $_GET['name_filter'];
+                        $filtered_subjects = array_filter($subjects, function($subject) use ($filter_name) {
+                            return $subject['subject_name'] === $filter_name;
+                        });
+                    }
+                    
+                    foreach($filtered_subjects as $subject): 
+                    ?>
                     <tr>
                         <td><code><?php echo htmlspecialchars($subject['subject_code']); ?></code></td>
                         <td><strong><?php echo htmlspecialchars($subject['subject_name']); ?></strong></td>
@@ -221,11 +297,17 @@ renderPageStart('Manage Subjects', 'admin', 'manage_subjects.php');
             </table>
         </div>
         
-        <?php if (empty($subjects)): ?>
+        <?php if (empty($filtered_subjects)): ?>
             <div class="text-center py-5">
                 <i class="fas fa-book fa-3x text-muted mb-3"></i>
                 <h5>No subjects found</h5>
-                <p class="text-muted">Start by adding your first subject.</p>
+                <p class="text-muted">
+                    <?php if (isset($_GET['name_filter']) && !empty($_GET['name_filter'])): ?>
+                        No subjects found with the selected filter. <a href="manage_subjects.php">Clear filters</a> to see all subjects.
+                    <?php else: ?>
+                        Start by adding your first subject.
+                    <?php endif; ?>
+                </p>
             </div>
         <?php endif; ?>
     </div>
@@ -235,7 +317,7 @@ renderPageStart('Manage Subjects', 'admin', 'manage_subjects.php');
 <div class="modal fade" id="addSubjectModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
-            <form method="POST">
+            <form method="POST" id="addSubjectForm">
                 <div class="modal-header">
                     <h5 class="modal-title">Add New Subject</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -270,7 +352,7 @@ renderPageStart('Manage Subjects', 'admin', 'manage_subjects.php');
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add Subject</button>
+                    <button type="submit" class="btn btn-primary" id="addSubjectBtn">Add Subject</button>
                 </div>
             </form>
         </div>
@@ -281,7 +363,7 @@ renderPageStart('Manage Subjects', 'admin', 'manage_subjects.php');
 <div class="modal fade" id="editSubjectModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
-            <form method="POST">
+            <form method="POST" id="editSubjectForm">
                 <div class="modal-header">
                     <h5 class="modal-title">Edit Subject</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -309,7 +391,7 @@ renderPageStart('Manage Subjects', 'admin', 'manage_subjects.php');
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-warning">Update Subject</button>
+                    <button type="submit" class="btn btn-warning" id="editSubjectBtn">Update Subject</button>
                 </div>
             </form>
         </div>
@@ -343,6 +425,20 @@ function deleteSubject(id, code) {
 // Auto uppercase subject code
 document.getElementById('subject_code').addEventListener('input', function() {
     this.value = this.value.toUpperCase();
+});
+
+// Prevent double form submission
+document.addEventListener('DOMContentLoaded', function() {
+    const forms = document.querySelectorAll('form');
+    forms.forEach(form => {
+        form.addEventListener('submit', function() {
+            const submitBtn = this.querySelector('button[type="submit"]');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            }
+        });
+    });
 });
 </script>
 
