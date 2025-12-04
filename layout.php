@@ -3,7 +3,7 @@
 function renderHeader($title, $user_name, $user_role) {
     $navbar_theme = getNavbarTheme();
     return '
-    <nav class="navbar navbar-expand-lg ' . $navbar_theme . ' border-bottom">
+    <nav class="navbar navbar-expand-lg ' . $navbar_theme . ' border-bottom fixed-top" style="z-index: 1030;">
         <div class="container-fluid">
             <span class="navbar-brand mb-0 h1">
                 <i class="fas fa-graduation-cap"></i> ' . $title . '
@@ -80,7 +80,7 @@ function renderSidebar($role, $current_page = '') {
         case 'cashier': $menu = $cashier_menu; break;
     }
     
-    $html = '<nav class="sidebar ' . $sidebar_theme . '" style="width: 250px; min-height: calc(100vh - 56px); position: fixed; top: 56px; left: 0; overflow-y: auto;">
+    $html = '<nav class="sidebar ' . $sidebar_theme . '" style="width: 250px; height: calc(100vh - 56px); position: fixed; top: 56px; left: 0; overflow-y: auto; z-index: 1025;">
         <div class="p-3">
             <ul class="nav flex-column">';
     
@@ -114,6 +114,9 @@ function renderPageStart($title, $role, $current_page = '') {
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         ' . getThemeCSS() . '
         <style>
+        body {
+            padding-top: 56px;
+        }
         .main-content {
             margin-left: 250px;
             padding: 20px;
@@ -127,7 +130,7 @@ function renderPageStart($title, $role, $current_page = '') {
                 width: 100%;
                 position: relative !important;
                 top: 0 !important;
-                min-height: auto !important;
+                height: auto !important;
             }
             .main-content {
                 margin-left: 0;
@@ -179,4 +182,4 @@ function renderStatsCard($title, $value, $icon, $color = 'primary') {
         </div>
     </div>';
 }
-?>
+?> 
