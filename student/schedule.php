@@ -8,17 +8,52 @@ requireRole('student');
 $pdo = getDBConnection();
 $user_id = $_SESSION['user_id'];
 
-// Get current semester sections for this student
-$stmt = $pdo->prepare("SELECT s.*, sec.section_code, sec.year_level, sec.program
-                       FROM subjects s
-                       JOIN sections sec ON JSON_CONTAINS(s.sections, JSON_QUOTE(sec.section_code))
-                       WHERE JSON_CONTAINS(sec.user_id, JSON_QUOTE(?)) 
-                       AND sec.status = 'active'
-                       ORDER BY s.subject_code");
+// Get student basic info
+$stmt = $pdo->prepare("SELECT si.*, u.name, u.email 
+                       FROM students_info si 
+                       JOIN users u ON si.user_id = u.user_id 
+                       WHERE si.user_id = ?");
 $stmt->execute([$user_id]);
-$current_subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$student_info = $stmt->fetch(PDO::FETCH_ASSOC);
 
-// Get payment status for each subject (prelim, midterm, prefinals, finals)
+// Get current sections for this student
+$stmt = $pdo->prepare("SELECT s.id, s.section_code, s.program, s.year_level, 
+                              s.section_name
+                       FROM sections s
+                       JOIN student_sections ss ON s.id = ss.section_id
+                       WHERE ss.student_id = ? AND s.status = 'active'");
+$stmt->execute([$user_id]);
+$current_sections = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get subjects for current sections
+$current_subjects = [];
+$total_units = 0;
+$section_subjects = [];
+
+foreach ($current_sections as $section) {
+    $stmt = $pdo->prepare("SELECT sub.* 
+                           FROM subjects sub
+                           JOIN student_subjects ss ON sub.id = ss.subject_id
+                           WHERE ss.student_id = ? 
+                           AND sub.id IN (
+                               SELECT subject_id FROM student_subjects 
+                               WHERE student_id = ?
+                           )");
+    $stmt->execute([$user_id, $user_id]);
+    $subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $section_subjects[$section['id']] = [
+        'section_info' => $section,
+        'subjects' => $subjects
+    ];
+    
+    foreach ($subjects as $subject) {
+        $current_subjects[$subject['id']] = $subject;
+        $total_units += $subject['units'];
+    }
+}
+
+// Get payment status for each subject
 $payment_types = ['prelim', 'midterm', 'prefinals', 'finals'];
 $payment_status = [];
 
@@ -32,39 +67,63 @@ foreach($current_subjects as $subject) {
                                LIMIT 1");
         $stmt->execute([$user_id, "%{$type}%", "%{$subject['subject_code']}%"]);
         $status = $stmt->fetchColumn();
-        $payment_status[$subject['subject_code']][$type] = $status ?: 'unpaid';
+        $payment_status[$subject['id']][$type] = $status ?: 'unpaid';
     }
 }
 
-// Get previous sections (if any)
-$stmt = $pdo->prepare("SELECT DISTINCT sec.section_code, sec.year_level, sec.program, sec.id as section_id
-                       FROM sections sec 
-                       WHERE JSON_CONTAINS(sec.user_id, JSON_QUOTE(?)) 
-                       AND sec.status = 'inactive'
-                       ORDER BY sec.year_level DESC");
-$stmt->execute([$user_id]);
-$previous_sections = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// Get class schedule information (you might need to create this table)
+$class_schedule = [];
+try {
+    $stmt = $pdo->prepare("SELECT cs.*, s.subject_code, s.subject_name, sec.section_code
+                           FROM class_schedule cs
+                           JOIN subjects s ON cs.subject_id = s.id
+                           JOIN sections sec ON cs.section_id = sec.id
+                           WHERE cs.section_id IN (
+                               SELECT section_id FROM student_sections 
+                               WHERE student_id = ?
+                           )
+                           ORDER BY cs.day_of_week, cs.start_time");
+    $stmt->execute([$user_id]);
+    $class_schedule = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    // Class schedule table might not exist yet
+    $class_schedule = [];
+}
 
-// Get student info for current section display
-$stmt = $pdo->prepare("SELECT program, year_level, student_type FROM students_info WHERE user_id = ?");
-$stmt->execute([$user_id]);
-$student_info = $stmt->fetch(PDO::FETCH_ASSOC);
+// Organize schedule by day
+$schedule_by_day = [
+    'Monday' => [], 'Tuesday' => [], 'Wednesday' => [], 
+    'Thursday' => [], 'Friday' => [], 'Saturday' => [], 'Sunday' => []
+];
 
-renderPageStart('My Schedule', 'student', 'schedule.php');
+foreach ($class_schedule as $class) {
+    $day = $class['day_of_week'];
+    if (isset($schedule_by_day[$day])) {
+        $schedule_by_day[$day][] = $class;
+    }
+}
+
+// Get academic summary
+$stmt = $pdo->prepare("SELECT 
+    COUNT(DISTINCT subject_id) as total_subjects,
+    SUM(s.units) as total_units
+    FROM student_subjects ss
+    JOIN subjects s ON ss.subject_id = s.id
+    WHERE ss.student_id = ?");
+$stmt->execute([$user_id]);
+$academic_summary = $stmt->fetch(PDO::FETCH_ASSOC);
+
+renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
 ?>
 
 <style>
-.payment-status-badge {
-    font-size: 0.7rem;
-    padding: 2px 6px;
-}
-.subject-card {
+.study-load-card {
     border-left: 4px solid #007bff;
     transition: all 0.3s ease;
 }
-.subject-card:hover {
+.study-load-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 .payment-grid {
     display: grid;
@@ -72,197 +131,298 @@ renderPageStart('My Schedule', 'student', 'schedule.php');
     gap: 5px;
     margin-top: 10px;
 }
+.schedule-slot {
+    border-left: 3px solid #28a745;
+    background: #f8f9fa;
+    margin-bottom: 8px;
+    padding: 10px;
+    border-radius: 4px;
+}
+.section-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+.subject-badge {
+    font-size: 0.75rem;
+}
+.info-card {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+    border: none;
+}
+.summary-card {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+    border: none;
+}
 </style>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>My Academic Schedule</h2>
-    <div class="text-muted">
-        <?php echo $student_info['student_type'] ? ucfirst($student_info['student_type']) . ' Student' : 'Student'; ?>
-    </div>
-</div>
-
-<!-- Current Semester Info -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="alert alert-info">
-            <h5 class="alert-heading">
-                <i class="fas fa-calendar-alt"></i> Current Semester Information
-            </h5>
-            <div class="row">
-                <div class="col-md-4">
-                    <strong>Program:</strong> <?php echo htmlspecialchars($student_info['program'] ?? 'Not Set'); ?>
-                </div>
-                <div class="col-md-4">
-                    <strong>Year Level:</strong> <?php echo $student_info['year_level'] ?? 'Not Set'; ?>
-                </div>
-                <div class="col-md-4">
-                    <strong>Total Subjects:</strong> <?php echo count($current_subjects); ?>
+<div class="container-fluid">
+    <!-- Student Information Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card info-card shadow">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h3 class="card-title mb-1"><?php echo htmlspecialchars($student_info['name']); ?></h3>
+                            <p class="card-text mb-1">
+                                <strong>Student ID:</strong> <?php echo htmlspecialchars($user_id); ?> | 
+                                <strong>Program:</strong> <?php echo htmlspecialchars($student_info['program'] ?? 'Not Set'); ?> | 
+                                <strong>Year Level:</strong> <?php echo $student_info['year_level'] ?? 'Not Set'; ?>
+                            </p>
+                            <p class="card-text mb-0">
+                                <strong>Student Type:</strong> 
+                                <span class="badge bg-<?php echo ($student_info['student_type'] ?? 'regular') === 'regular' ? 'success' : 'warning'; ?>">
+                                    <?php echo ucfirst($student_info['student_type'] ?? 'regular'); ?>
+                                </span> | 
+                                <strong>Email:</strong> <?php echo htmlspecialchars($student_info['email']); ?>
+                            </p>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <div class="display-4 fw-bold"><?php echo $total_units; ?></div>
+                            <p class="mb-0">Total Units</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
-<!-- Current Subjects -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="fas fa-book"></i> Current Subjects
-                </h5>
+    <!-- Academic Summary -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card summary-card text-center shadow">
+                <div class="card-body">
+                    <div class="display-6 fw-bold"><?php echo count($current_sections); ?></div>
+                    <p class="mb-0">Sections</p>
+                </div>
             </div>
-            <div class="card-body">
-                <?php if (empty($current_subjects)): ?>
-                    <div class="text-center py-5">
+        </div>
+        <div class="col-md-3">
+            <div class="card summary-card text-center shadow">
+                <div class="card-body">
+                    <div class="display-6 fw-bold"><?php echo count($current_subjects); ?></div>
+                    <p class="mb-0">Subjects</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card summary-card text-center shadow">
+                <div class="card-body">
+                    <div class="display-6 fw-bold"><?php echo $total_units; ?></div>
+                    <p class="mb-0">Total Units</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card summary-card text-center shadow">
+                <div class="card-body">
+                    <div class="display-6 fw-bold"><?php echo $student_info['year_level'] ?? '-'; ?></div>
+                    <p class="mb-0">Year Level</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Study Load by Section -->
+        <div class="col-lg-8">
+            <?php if (empty($section_subjects)): ?>
+                <div class="card">
+                    <div class="card-body text-center py-5">
                         <i class="fas fa-book-open fa-3x text-muted mb-3"></i>
-                        <h5>No subjects enrolled</h5>
-                        <p class="text-muted">You are not currently enrolled in any subjects.</p>
+                        <h4>No Study Load Assigned</h4>
+                        <p class="text-muted">You are not currently enrolled in any sections or subjects.</p>
                     </div>
-                <?php else: ?>
-                    <div class="row">
-                        <?php foreach($current_subjects as $subject): ?>
-                        <div class="col-md-6 mb-4">
-                            <div class="card subject-card h-100">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-start mb-2">
-                                        <h6 class="card-title mb-0">
-                                            <?php echo htmlspecialchars($subject['subject_code']); ?>
-                                        </h6>
-                                        <span class="badge bg-primary"><?php echo $subject['units']; ?> units</span>
-                                    </div>
-                                    
-                                    <p class="card-text"><?php echo htmlspecialchars($subject['subject_name']); ?></p>
-                                    
-                                    <?php if ($subject['description']): ?>
-                                        <p class="text-muted small"><?php echo htmlspecialchars($subject['description']); ?></p>
-                                    <?php endif; ?>
-                                    
-                                    <div class="mt-3">
-                                        <h6 class="small text-muted mb-2">Payment Status:</h6>
-                                        <div class="payment-grid">
-                                            <?php foreach($payment_types as $type): ?>
-                                                <?php 
-                                                $status = $payment_status[$subject['subject_code']][$type] ?? 'unpaid';
-                                                $badge_class = match($status) {
-                                                    'paid' => 'success',
-                                                    'partial' => 'warning',
-                                                    'unpaid' => 'danger',
-                                                    default => 'secondary'
-                                                };
-                                                ?>
-                                                <div class="text-center">
-                                                    <small class="d-block text-muted"><?php echo ucfirst($type); ?></small>
-                                                    <span class="badge bg-<?php echo $badge_class; ?> payment-status-badge">
-                                                        <?php echo ucfirst($status); ?>
-                                                    </span>
-                                                </div>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    </div>
+                </div>
+            <?php else: ?>
+                <?php foreach($section_subjects as $section_id => $data): 
+                    $section = $data['section_info'];
+                    $subjects = $data['subjects'];
+                ?>
+                    <div class="card mb-4 shadow">
+                        <div class="section-header">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h4 class="mb-1"><?php echo htmlspecialchars($section['section_code']); ?></h4>
+                                    <p class="mb-0">
+                                        <?php echo htmlspecialchars($section['program']); ?> - 
+                                        Year <?php echo $section['year_level']; ?>
+                                        <?php if (!empty($section['section_name'])): ?>
+                                            | <?php echo htmlspecialchars($section['section_name']); ?>
+                                        <?php endif; ?>
+                                    </p>
                                 </div>
-                                <div class="card-footer bg-light">
-                                    <small class="text-muted">
-                                        <i class="fas fa-layer-group"></i> Section: <?php echo htmlspecialchars($subject['section_code']); ?>
-                                    </small>
+                                <div class="text-end">
+                                    <span class="badge bg-light text-dark fs-6">
+                                        <?php 
+                                        $section_units = array_sum(array_column($subjects, 'units'));
+                                        echo $section_units . ' units';
+                                        ?>
+                                    </span>
                                 </div>
                             </div>
                         </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-</div>
+                        <div class="card-body">
+                            <div class="row">
+                                <?php foreach($subjects as $subject): ?>
+                                <div class="col-md-6 mb-3">
+                                    <div class="card study-load-card h-100">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                                <h6 class="card-title mb-0 text-primary">
+                                                    <?php echo htmlspecialchars($subject['subject_code']); ?>
+                                                </h6>
+                                                <span class="badge bg-primary subject-badge">
+                                                    <?php echo $subject['units']; ?> units
+                                                </span>
+                                            </div>
+                                            
+                                            <h6 class="card-subtitle mb-2 text-dark">
+                                                <?php echo htmlspecialchars($subject['subject_name']); ?>
+                                            </h6>
+                                            
+                                            <?php if ($subject['description']): ?>
+                                                <p class="text-muted small mb-2"><?php echo htmlspecialchars($subject['description']); ?></p>
+                                            <?php endif; ?>
 
-<!-- Previous Sections -->
-<?php if (!empty($previous_sections)): ?>
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="fas fa-history"></i> Previous Sections
-                </h5>
-            </div>
-            <div class="card-body">
-                <div class="accordion" id="previousSectionsAccordion">
-                    <?php foreach($previous_sections as $index => $section): ?>
-                    <div class="accordion-item">
-                        <h2 class="accordion-header" id="heading<?php echo $index; ?>">
-                            <button class="accordion-button collapsed" type="button" 
-                                    data-bs-toggle="collapse" data-bs-target="#collapse<?php echo $index; ?>" 
-                                    aria-expanded="false" aria-controls="collapse<?php echo $index; ?>">
-                                <?php echo htmlspecialchars($section['section_code']); ?> - 
-                                <?php echo htmlspecialchars($section['program']); ?> 
-                                (Year <?php echo $section['year_level']; ?>)
-                            </button>
-                        </h2>
-                        <div id="collapse<?php echo $index; ?>" class="accordion-collapse collapse" 
-                             aria-labelledby="heading<?php echo $index; ?>" data-bs-parent="#previousSectionsAccordion">
-                            <div class="accordion-body">
-                                <?php
-                                // Get subjects for this previous section
-                                $stmt = $pdo->prepare("SELECT s.* FROM subjects s 
-                                                       WHERE JSON_CONTAINS(s.sections, JSON_QUOTE(?))");
-                                $stmt->execute([$section['section_code']]);
-                                $prev_subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                                ?>
-                                
-                                <?php if (empty($prev_subjects)): ?>
-                                    <p class="text-muted">No subjects found for this section.</p>
-                                <?php else: ?>
-                                    <div class="row">
-                                        <?php foreach($prev_subjects as $prev_subject): ?>
-                                        <div class="col-md-4 mb-3">
-                                            <div class="card border-secondary">
-                                                <div class="card-body p-3">
-                                                    <h6 class="card-title"><?php echo htmlspecialchars($prev_subject['subject_code']); ?></h6>
-                                                    <p class="card-text small"><?php echo htmlspecialchars($prev_subject['subject_name']); ?></p>
-                                                    <span class="badge bg-secondary"><?php echo $prev_subject['units']; ?> units</span>
+                                            <!-- Payment Status -->
+                                            <div class="mt-3">
+                                                <h6 class="small text-muted mb-2">Payment Status:</h6>
+                                                <div class="payment-grid">
+                                                    <?php foreach($payment_types as $type): ?>
+                                                        <?php 
+                                                        $status = $payment_status[$subject['id']][$type] ?? 'unpaid';
+                                                        $badge_class = match($status) {
+                                                            'paid' => 'success',
+                                                            'partial' => 'warning',
+                                                            'unpaid' => 'danger',
+                                                            default => 'secondary'
+                                                        };
+                                                        ?>
+                                                        <div class="text-center">
+                                                            <small class="d-block text-muted"><?php echo ucfirst($type); ?></small>
+                                                            <span class="badge bg-<?php echo $badge_class; ?> payment-status-badge">
+                                                                <?php echo ucfirst($status); ?>
+                                                            </span>
+                                                        </div>
+                                                    <?php endforeach; ?>
                                                 </div>
                                             </div>
                                         </div>
-                                        <?php endforeach; ?>
                                     </div>
-                                <?php endif; ?>
+                                </div>
+                                <?php endforeach; ?>
                             </div>
                         </div>
                     </div>
-                    <?php endforeach; ?>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+
+        <!-- Class Schedule & Quick Info -->
+        <div class="col-lg-4">
+            <!-- Class Schedule -->
+            <div class="card shadow mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-calendar-alt me-2"></i>Weekly Schedule
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <?php if (empty($class_schedule)): ?>
+                        <div class="text-center py-3">
+                            <i class="fas fa-clock fa-2x text-muted mb-2"></i>
+                            <p class="text-muted mb-0">Class schedule not available</p>
+                        </div>
+                    <?php else: ?>
+                        <div class="schedule-container">
+                            <?php foreach($schedule_by_day as $day => $classes): ?>
+                                <?php if (!empty($classes)): ?>
+                                    <div class="mb-3">
+                                        <h6 class="text-primary border-bottom pb-1"><?php echo $day; ?></h6>
+                                        <?php foreach($classes as $class): ?>
+                                            <div class="schedule-slot">
+                                                <div class="d-flex justify-content-between align-items-start">
+                                                    <div>
+                                                        <strong class="d-block"><?php echo htmlspecialchars($class['subject_code']); ?></strong>
+                                                        <small class="text-muted"><?php echo htmlspecialchars($class['subject_name']); ?></small>
+                                                    </div>
+                                                    <div class="text-end">
+                                                        <small class="text-primary fw-bold">
+                                                            <?php echo date('g:i A', strtotime($class['start_time'])); ?> - 
+                                                            <?php echo date('g:i A', strtotime($class['end_time'])); ?>
+                                                        </small><br>
+                                                        <small class="text-muted"><?php echo htmlspecialchars($class['room'] ?? 'TBA'); ?></small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
-        </div>
-    </div>
-</div>
-<?php endif; ?>
 
-<!-- Payment Legend -->
-<div class="row mt-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body">
-                <h6 class="card-title">Payment Status Legend:</h6>
-                <div class="d-flex flex-wrap gap-3">
-                    <div>
-                        <span class="badge bg-success payment-status-badge">Paid</span>
-                        <small class="text-muted ms-1">Fully paid</small>
+            <!-- Quick Stats -->
+            <div class="card shadow">
+                <div class="card-header bg-info text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-chart-bar me-2"></i>Study Load Summary
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <strong>Total Sections:</strong>
+                        <span class="float-end"><?php echo count($current_sections); ?></span>
                     </div>
-                    <div>
-                        <span class="badge bg-warning payment-status-badge">Partial</span>
-                        <small class="text-muted ms-1">Partially paid</small>
+                    <div class="mb-3">
+                        <strong>Total Subjects:</strong>
+                        <span class="float-end"><?php echo count($current_subjects); ?></span>
                     </div>
-                    <div>
-                        <span class="badge bg-danger payment-status-badge">Unpaid</span>
-                        <small class="text-muted ms-1">Not yet paid</small>
+                    <div class="mb-3">
+                        <strong>Total Units:</strong>
+                        <span class="float-end fw-bold text-primary"><?php echo $total_units; ?></span>
+                    </div>
+                    <div class="mb-3">
+                        <strong>Student Status:</strong>
+                        <span class="float-end badge bg-<?php echo ($student_info['student_type'] ?? 'regular') === 'regular' ? 'success' : 'warning'; ?>">
+                            <?php echo ucfirst($student_info['student_type'] ?? 'regular'); ?>
+                        </span>
+                    </div>
+                    <hr>
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle me-1"></i>
+                        This study load reflects your current enrollment for the active semester.
+                    </small>
+                </div>
+            </div>
+
+            <!-- Payment Legend -->
+            <div class="card shadow mt-4">
+                <div class="card-body">
+                    <h6 class="card-title">Payment Status Legend:</h6>
+                    <div class="d-flex flex-column gap-2">
+                        <div>
+                            <span class="badge bg-success payment-status-badge">Paid</span>
+                            <small class="text-muted ms-1">Fully paid</small>
+                        </div>
+                        <div>
+                            <span class="badge bg-warning payment-status-badge">Partial</span>
+                            <small class="text-muted ms-1">Partially paid</small>
+                        </div>
+                        <div>
+                            <span class="badge bg-danger payment-status-badge">Unpaid</span>
+                            <small class="text-muted ms-1">Not yet paid</small>
+                        </div>
                     </div>
                 </div>
-                <hr>
-                <small class="text-muted">
-                    <strong>Note:</strong> Payment status shows your payment for each examination period (Prelim, Midterm, Prefinals, Finals). 
-                    Contact the cashier or admin office for payment processing.
-                </small>
             </div>
         </div>
     </div>
