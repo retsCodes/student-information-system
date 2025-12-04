@@ -44,11 +44,18 @@ function checkSession() {
     
     // Check session timeout
     if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > SESSION_TIMEOUT) {
+        // Log the timeout but don't try to log with the expired session user
         session_destroy();
         return false;
     }
     
     $_SESSION['last_activity'] = time();
+    
+    // Update last active in database
+    if (isset($_SESSION['user_id'])) {
+        updateLastActive($_SESSION['user_id']);
+    }
+    
     return true;
 }
 
@@ -62,6 +69,8 @@ function requireAuth() {
 function requireRole($required_role) {
     requireAuth();
     if ($_SESSION['role'] !== $required_role) {
+        // Log the unauthorized access attempt
+        logActivity($_SESSION['user_id'], 'Unauthorized Access', "Attempted to access restricted content requiring role: $required_role");
         header('Location: /student\'s-information-system/unauthorized.php');
         exit();
     }
@@ -92,36 +101,73 @@ function checkLoginAttempts($user_id, $ip_address) {
 function recordLoginAttempt($user_id, $ip_address, $success = false) {
     $pdo = getDBConnection();
     
-    if ($success) {
-        // Clear login attempts on successful login
-        $stmt = $pdo->prepare("DELETE FROM login_attempts WHERE user_id = ? OR ip_address = ?");
-        $stmt->execute([$user_id, $ip_address]);
-    } else {
-        // Record failed attempt
-        $stmt = $pdo->prepare("SELECT id, attempts FROM login_attempts WHERE user_id = ? OR ip_address = ?");
-        $stmt->execute([$user_id, $ip_address]);
-        $existing = $stmt->fetch();
-        
-        if ($existing) {
-            $new_attempts = $existing['attempts'] + 1;
-            $locked_until = ($new_attempts >= MAX_LOGIN_ATTEMPTS) ? date('Y-m-d H:i:s', time() + LOCKOUT_TIME) : null;
-            
-            $stmt = $pdo->prepare("UPDATE login_attempts SET attempts = ?, last_attempt = NOW(), locked_until = ? WHERE id = ?");
-            $stmt->execute([$new_attempts, $locked_until, $existing['id']]);
-        } else {
-            $stmt = $pdo->prepare("INSERT INTO login_attempts (user_id, ip_address, attempts) VALUES (?, ?, 1)");
+    try {
+        if ($success) {
+            // Clear login attempts on successful login
+            $stmt = $pdo->prepare("DELETE FROM login_attempts WHERE user_id = ? OR ip_address = ?");
             $stmt->execute([$user_id, $ip_address]);
+            
+            // Log successful login
+            logActivity($user_id, 'Login', 'User logged in successfully');
+        } else {
+            // Record failed attempt
+            $stmt = $pdo->prepare("SELECT id, attempts FROM login_attempts WHERE user_id = ? OR ip_address = ?");
+            $stmt->execute([$user_id, $ip_address]);
+            $existing = $stmt->fetch();
+            
+            if ($existing) {
+                $new_attempts = $existing['attempts'] + 1;
+                $locked_until = ($new_attempts >= MAX_LOGIN_ATTEMPTS) ? date('Y-m-d H:i:s', time() + LOCKOUT_TIME) : null;
+                
+                $stmt = $pdo->prepare("UPDATE login_attempts SET attempts = ?, last_attempt = NOW(), locked_until = ? WHERE id = ?");
+                $stmt->execute([$new_attempts, $locked_until, $existing['id']]);
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO login_attempts (user_id, ip_address, attempts) VALUES (?, ?, 1)");
+                $stmt->execute([$user_id, $ip_address]);
+            }
+            
+            // Log failed login attempt
+            logActivity($user_id ?? 'unknown', 'Failed Login', "Failed login attempt from IP: $ip_address");
         }
+        return true;
+    } catch (Exception $e) {
+        error_log("Login attempt recording failed: " . $e->getMessage());
+        return false;
     }
 }
 
 // Activity logging
 function logActivity($user_id, $action, $description = '') {
     $pdo = getDBConnection();
-    $log_id = 'LOG' . date('YmdHis') . rand(100, 999);
     
-    $stmt = $pdo->prepare("INSERT INTO activity_logs (log_id, user_id, action, description) VALUES (?, ?, ?, ?)");
-    $stmt->execute([$log_id, $user_id, $action, $description]);
+    try {
+        // Check if user exists before logging
+        $checkUser = $pdo->prepare("SELECT user_id FROM users WHERE user_id = ?");
+        $checkUser->execute([$user_id]);
+        
+        $final_user_id = $user_id;
+        
+        if ($checkUser->rowCount() === 0) {
+            // User doesn't exist, use system user instead
+            $systemUser = $pdo->query("SELECT user_id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")->fetch();
+            if ($systemUser) {
+                $final_user_id = $systemUser['user_id'];
+            } else {
+                // If no admin user exists, we can't log the activity
+                error_log("Cannot log activity: No valid user found for ID: $user_id");
+                return false;
+            }
+        }
+        
+        // Use the corrected database structure without log_id
+        $stmt = $pdo->prepare("INSERT INTO activity_logs (user_id, action, description, created_at) VALUES (?, ?, ?, NOW())");
+        $stmt->execute([$final_user_id, $action, $description]);
+        return true;
+    } catch(PDOException $e) {
+        // Log the error but don't break the application
+        error_log("Activity logging failed: " . $e->getMessage());
+        return false;
+    }
 }
 
 // Utility functions
@@ -222,5 +268,15 @@ function showSuccess($message) {
 function redirect($url) {
     header("Location: $url");
     exit();
+}
+
+// Initialize CSRF token if not exists
+if (!isset($_SESSION['csrf_token'])) {
+    generateCSRFToken();
+}
+
+// Auto-check session for authenticated users
+if (isset($_SESSION['user_id'])) {
+    checkSession();
 }
 ?>
