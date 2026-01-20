@@ -51,7 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $error = 'Name is required.';
                 } elseif (empty($email) || !validateEmail($email)) {
                     $error = 'Valid email is required.';
-                } elseif (empty($role) || !in_array($role, ['admin', 'cashier', 'student'])) {
+                } elseif (empty($role) || !in_array($role, ['admin', 'cashier', 'student', 'registrar'])) {
                     $error = 'Valid role is required.';
                 } elseif (empty($password) || strlen($password) < 6) {
                     $error = 'Password must be at least 6 characters.';
@@ -511,6 +511,7 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                         <option value="admin">Admin</option>
                         <option value="cashier">Cashier</option>
                         <option value="student">Student</option>
+                        <option value="registrar">Registrar</option>
                     </select>
                 </div>
 
@@ -777,6 +778,7 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                     <option value="admin" <?php echo $role_filter === 'admin' ? 'selected' : ''; ?>>Admin</option>
                     <option value="cashier" <?php echo $role_filter === 'cashier' ? 'selected' : ''; ?>>Cashier</option>
                     <option value="student" <?php echo $role_filter === 'student' ? 'selected' : ''; ?>>Student</option>
+                    <option value="student" <?php echo $role_filter === 'registrar' ? 'selected' : ''; ?>>Registrar</option>
                 </select>
             </div>
             <div class="col-md-3">
