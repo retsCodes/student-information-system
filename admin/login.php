@@ -1,28 +1,30 @@
 <?php
-require_once 'init.php';
-require_once 'theme.php';
+require_once '../init.php';
+require_once '../theme.php';
 
 $error = '';
 $success = '';
 
-// Redirect if already logged in
+// Redirect if already logged in as admin
 if (checkSession()) {
     $role = $_SESSION['role'] ?? '';
-    
-    // Redirect to appropriate dashboard based on role
-    switch ($role) {
-        case 'admin':
-            redirect('/student\'s-information-system/admin/index.php');
-            break;
-        case 'cashier':
-            redirect('/student\'s-information-system/cashier/index.php');
-            break;
-        case 'registrar':
-            redirect('/student\'s-information-system/registrar/index.php');
-            break;
-        case 'student':
-        default:
-            redirect('/student\'s-information-system/student/index.php');
+    if ($role === 'admin') {
+        redirect('/student\'s-information-system/admin/index.php');
+    } else {
+        // If logged in as non-admin, redirect to their dashboard
+        switch ($role) {
+            case 'cashier':
+                redirect('/student\'s-information-system/cashier/index.php');
+                break;
+            case 'registrar':
+                redirect('/student\'s-information-system/registrar/index.php');
+                break;
+            case 'student':
+                redirect('/student\'s-information-system/student/index.php');
+                break;
+            default:
+                redirect('/student\'s-information-system/index.php');
+        }
     }
 }
 
@@ -37,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
     // Validate inputs
     else if (empty($user_id)) {
-        $error = 'User ID is required.';
+        $error = 'Admin ID is required.';
     }
     else if (empty($password)) {
         $error = 'Password is required.';
@@ -49,9 +51,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         if (!checkLoginAttempts($user_id, $ip_address)) {
             $error = 'Too many failed login attempts. Please try again later.';
         } else {
-            // Verify credentials - EXCLUDE ADMIN from this login page
+            // Verify credentials - ONLY ADMINS on this page
             $pdo = getDBConnection();
-            $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ? AND user_status = 'active' AND role != 'admin'");
+            $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ? AND user_status = 'active' AND role = 'admin'");
             $stmt->execute([$user_id]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
             
@@ -69,24 +71,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 updateLastActive($user['user_id']);
                 
                 // Log activity
-                logActivity($user['user_id'], 'Login', 'User logged in successfully');
+                logActivity($user['user_id'], 'Admin Login', 'Admin logged in successfully');
                 
-                // Redirect to appropriate dashboard based on role
-                switch ($user['role']) {
-                    case 'cashier':
-                        redirect('/student\'s-information-system/cashier/index.php');
-                        break;
-                    case 'registrar':
-                        redirect('/student\'s-information-system/registrar/index.php');
-                        break;
-                    case 'student':
-                    default:
-                        redirect('/student\'s-information-system/student/index.php');
-                }
+                // Redirect to admin dashboard
+                redirect('/student\'s-information-system/admin/index.php');
             } else {
                 // Failed login
                 recordLoginAttempt($user_id, $ip_address, false);
-                $error = 'Invalid credentials or account is locked.';
+                $error = 'Invalid admin credentials or account is locked.';
             }
         }
     }
@@ -97,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Student Information System</title>
+    <title>Admin Login - Student Information System</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <?php echo getThemeCSS(); ?>
@@ -105,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <body class="<?php echo getThemeClasses(); ?>">
     <div class="bg"></div>
     <div class="logo">
-        <img src="images/logo.png" alt="Logo">
+        <img src="../images/logo.png" alt="Logo">
     </div>
     <div class="container-fluid vh-100 d-flex align-items-center justify-content-center">
         <div class="row w-100">
@@ -113,9 +105,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 <div class="card shadow <?php echo getCardTheme(); ?>">
                     <div class="card-body p-5">
                         <div class="text-center mb-4">
-                            <i class="fas fa-graduation-cap fa-3x text-primary mb-3"></i>
-                            <h3 class="card-title">Student Information System</h3>
-                            <p class="text-muted">Please sign in to your account</p>
+                            <i class="fas fa-user-shield fa-3x text-danger mb-3"></i>
+                            <h3 class="card-title">Admin Portal</h3>
+                            <p class="text-muted">Administrator login only</p>
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle"></i> Restricted Access
+                            </div>
                         </div>
                         
                         <?php if ($error): ?>
@@ -135,46 +130,40 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             
                             <div class="mb-3">
                                 <label for="user_id" class="form-label">
-                                    <i class="fas fa-user"></i> User ID
+                                    <i class="fas fa-user-shield"></i> Admin ID
                                 </label>
                                 <input type="text" class="form-control" id="user_id" name="user_id" 
                                        value="<?php echo htmlspecialchars($user_id ?? ''); ?>" 
-                                       placeholder="Enter your User ID" required>
+                                       placeholder="Enter Admin ID" required>
                             </div>
                             
                             <div class="mb-4">
                                 <label for="password" class="form-label">
-                                    <i class="fas fa-lock"></i> Password
+                                    <i class="fas fa-key"></i> Admin Password
                                 </label>
                                 <div class="input-group">
                                     <input type="password" class="form-control" id="password" name="password" 
-                                           placeholder="Enter your password" required>
+                                           placeholder="Enter Admin Password" required>
                                     <button class="btn btn-outline-secondary" type="button" id="togglePassword">
                                         <i class="fas fa-eye"></i>
                                     </button>
                                 </div>
                             </div>
                             
-                            <button type="submit" class="btn btn-primary w-100">
-                                <i class="fas fa-sign-in-alt"></i> Sign In
+                            <button type="submit" class="btn btn-danger w-100">
+                                <i class="fas fa-sign-in-alt"></i> Admin Login
                             </button>
                             
                             <div class="mt-3 text-center">
-                                <a href="/student's-information-system/admin/login.php" class="text-decoration-none">
-                                    <i class="fas fa-lock"></i> Admin Login
+                                <a href="/student's-information-system/index.php" class="text-decoration-none">
+                                    <i class="fas fa-arrow-left"></i> Back to Main Login
                                 </a>
                             </div>
                         </form>
                         
                         <div class="text-center mt-4">
-                            <small class="text-muted d-block">
-                                Student Login: C26-01-6465-MAN121 / rets123
-                            </small>
-                            <small class="text-muted d-block">
-                                Cashier Login: CASH001 / password
-                            </small>
                             <small class="text-muted">
-                                Registrar Login: REG001 / password
+                                Default Admin: ADMIN001 / admin123
                             </small>
                         </div>
                     </div>
@@ -202,15 +191,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 icon.classList.add('fa-eye');
             }
         });
+        
+        // Auto-focus on user_id field
+        document.getElementById('user_id').focus();
     </script>
     <style>
         .bg {
             position: fixed;
             top: 0; left: 0;
             width: 100%; height: 100%;
-            background: url('images/background.jpg') no-repeat center center fixed;
+            background: url('../images/background.jpg') no-repeat center center fixed;
             background-size: cover;
-            filter: blur(8px);
+            filter: blur(8px) brightness(0.7);
             z-index: -1;
         }
         .logo {
@@ -220,6 +212,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .logo img {
             height: 120px;
             width: auto;
+        }
+        .card {
+            border: 2px solid #dc3545;
         }
     </style>
 </body>

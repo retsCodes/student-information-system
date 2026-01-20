@@ -17,6 +17,8 @@ if (checkSession()) {
         case 'student':
             redirect('/student\'s-information-system/student/dashboard.php');
             break;
+        case 'registrar':
+            redirect('/student\'s-information-system/registrar/dashboard.php');
         default:
             // Invalid role, destroy session and redirect to login
             session_destroy();
