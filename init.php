@@ -248,6 +248,95 @@ function getEmployeeInfo($user_id) {
     return $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
+// =======================================================
+// PROFILE PICTURE FUNCTIONS
+// =======================================================
+
+// Get user profile picture from users table
+function getUserProfilePicture($user_id) {
+    $pdo = getDBConnection();
+    $stmt = $pdo->prepare("SELECT profile_picture FROM users WHERE user_id = ?");
+    $stmt->execute([$user_id]);
+    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    return $result ? $result['profile_picture'] : null;
+}
+
+// Load profile picture into session
+function loadProfilePictureIntoSession($user_id) {
+    $profile_pic = getUserProfilePicture($user_id);
+    if ($profile_pic) {
+        $_SESSION['profile_picture'] = $profile_pic;
+    }
+    return $profile_pic;
+}
+
+// Update profile picture in database
+function saveProfilePictureToDatabase($user_id, $filename) {
+    $pdo = getDBConnection();
+    $stmt = $pdo->prepare("UPDATE users SET profile_picture = ? WHERE user_id = ?");
+    return $stmt->execute([$filename, $user_id]);
+}
+
+// Delete old profile picture file
+function deleteOldProfilePicture($user_id) {
+    $old_picture = getUserProfilePicture($user_id);
+    if ($old_picture) {
+        $old_file = '../uploads/profile_pictures/' . $old_picture;
+        if (file_exists($old_file)) {
+            unlink($old_file);
+        }
+    }
+    return true;
+}
+
+// Update profile picture in session
+function updateProfilePictureInSession($filename) {
+    $_SESSION['profile_picture'] = $filename;
+    return true;
+}
+
+// Display profile picture with fallback
+function displayProfilePicture($size = 'md', $class = '') {
+    // Check if user is logged in
+    if (!isset($_SESSION['user_id'])) {
+        return '';
+    }
+    
+    // Get profile picture from session
+    $profile_pic = $_SESSION['profile_picture'] ?? null;
+    
+    // Size classes
+    $size_classes = [
+        'xs' => 'width: 24px; height: 24px; font-size: 12px;',
+        'sm' => 'width: 32px; height: 32px; font-size: 14px;',
+        'md' => 'width: 120px; height: 120px; font-size: 48px;',
+        'lg' => 'width: 200px; height: 200px; font-size: 80px;'
+    ];
+    
+    $size_style = $size_classes[$size] ?? $size_classes['md'];
+    
+    if ($profile_pic) {
+        return '<img src="../uploads/profile_pictures/' . htmlspecialchars($profile_pic) . '?t=' . time() . '" 
+                alt="Profile Picture" 
+                class="rounded-circle ' . $class . '" 
+                style="' . $size_style . ' object-fit: cover;">';
+    } else {
+        // Get user's name for initials
+        $name = $_SESSION['name'] ?? '';
+        $initial = $name ? strtoupper(substr($name, 0, 1)) : 'U';
+        
+        return '<div class="avatar-circle ' . $class . '" 
+                style="' . $size_style . ' background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; border-radius: 50%;">
+                ' . $initial . '
+                </div>';
+    }
+}
+
+// =======================================================
+// END PROFILE PICTURE FUNCTIONS
+// =======================================================
+
 // Update last active
 function updateLastActive($user_id) {
     $pdo = getDBConnection();
@@ -278,5 +367,10 @@ if (!isset($_SESSION['csrf_token'])) {
 // Auto-check session for authenticated users
 if (isset($_SESSION['user_id'])) {
     checkSession();
+    
+    // Load profile picture into session if not already loaded
+    if (!isset($_SESSION['profile_picture'])) {
+        loadProfilePictureIntoSession($_SESSION['user_id']);
+    }
 }
 ?>
