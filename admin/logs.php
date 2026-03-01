@@ -244,17 +244,17 @@ renderPageStart('Activity Logs', 'admin', 'logs.php');
 <?php endif; ?>
 
 <!-- Statistics Cards -->
-<div class="row mb-4">
-    <div class="col-md-3 mb-3">
+<div class="stats-card-container mb-4">
+    <div>
         <?php echo renderStatsCard('Total Logs', number_format($stats['total_logs']), 'fas fa-list', 'primary'); ?>
     </div>
-    <div class="col-md-3 mb-3">
+    <div>
         <?php echo renderStatsCard('Today\'s Logs', $stats['today_logs'], 'fas fa-calendar-day', 'success'); ?>
     </div>
-    <div class="col-md-3 mb-3">
+    <div>
         <?php echo renderStatsCard('This Week', $stats['week_logs'], 'fas fa-calendar-week', 'info'); ?>
     </div>
-    <div class="col-md-3 mb-3">
+    <div>
         <?php echo renderStatsCard('Active Users Today', $stats['active_users_today'], 'fas fa-users', 'warning'); ?>
     </div>
 </div>

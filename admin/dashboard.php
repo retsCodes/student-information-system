@@ -144,28 +144,13 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 renderPageStart('Admin Dashboard', 'admin', 'dashboard.php');
 ?>
-
-<!-- Include Chart.js from CDN -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-<div class="row mb-4">
-    <div class="col-md-3 mb-3">
-        <?php echo renderStatsCard('Total Users', $stats['total_users'], 'fas fa-users', 'primary'); ?>
-    </div>
-    <div class="col-md-3 mb-3">
-        <?php echo renderStatsCard('Students', $stats['total_students'], 'fas fa-user-graduate', 'success'); ?>
-    </div>
-    <div class="col-md-2 mb-3">
-        <?php echo renderStatsCard('Payments Today', $stats['payments_today'], 'fas fa-money-bill-wave', 'info'); ?>
-    </div>
-    <div class="col-md-2 mb-3">
-        <?php echo renderStatsCard('Unpaid Bills', $stats['unpaid_payments'], 'fas fa-exclamation-triangle', 'warning'); ?>
-    </div>
-    <div class="col-md-2 mb-3">
-        <?php echo renderStatsCard('Total Revenue', '₱' . number_format($stats['total_revenue'], 0), 'fas fa-chart-line', 'success'); ?>
-    </div>
+<div class="stats-card-container mb-4">
+    <?php echo renderStatsCard('Total Users', $stats['total_users'], 'fas fa-users', 'primary'); ?>
+    <?php echo renderStatsCard('Students', $stats['total_students'], 'fas fa-user-graduate', 'success'); ?>
+    <?php echo renderStatsCard('Payment Today', $stats['payments_today'], 'fas fa-money-bill-wave', 'info'); ?>
+    <?php echo renderStatsCard('Unpaid Bills', $stats['unpaid_payments'], 'fas fa-exclamation-triangle', 'warning'); ?>
+    <?php echo renderStatsCard('Total Revenue', '₱' . number_format($stats['total_revenue'], 0), 'fas fa-chart-line', 'success'); ?>
 </div>
-
 <div class="row">
     <div class="col-md-8 mb-4">
         <?php

@@ -952,17 +952,17 @@ renderPageStart('Manage Payments', 'admin', 'manage_payments.php');
 </div>
 
 <!-- Summary Cards -->
-<div class="row mb-4">
-    <div class="col-md-3 mb-3">
+<div class="stats-card-container mb-4">
+    <div>
         <?php echo renderStatsCard('Total Payments', number_format($summary['total_count']), 'fas fa-file-invoice-dollar', 'primary'); ?>
     </div>
-    <div class="col-md-3 mb-3">
+    <div>
         <?php echo renderStatsCard('Total Amount', '₱' . number_format($summary['total_amount'], 2), 'fas fa-money-bill-wave', 'info'); ?>
     </div>
-    <div class="col-md-3 mb-3">
+    <div>
         <?php echo renderStatsCard('Paid Amount', '₱' . number_format($summary['paid_amount'], 2), 'fas fa-check-circle', 'success'); ?>
     </div>
-    <div class="col-md-3 mb-3">
+    <div>
         <?php echo renderStatsCard('Outstanding', '₱' . number_format($summary['unpaid_amount'] + $summary['partial_balance'], 2), 'fas fa-exclamation-triangle', 'warning'); ?>
     </div>
 </div>
@@ -1244,22 +1244,45 @@ function selectStudent(studentId, studentName) {
 // Student filter functionality for filter form
 function filterStudentOptions() {
     const search = document.getElementById('student_filter').value.toLowerCase();
-    const options = document.querySelectorAll('.student-filter-option');
-    let hasVisible = false;
-    
-    options.forEach(option => {
-        const text = option.textContent.toLowerCase();
-        if (text.includes(search)) {
-            option.style.display = 'block';
-            hasVisible = true;
-        } else {
-            option.style.display = 'none';
-        }
-    });
-    
     const dropdown = document.getElementById('student_filter_dropdown');
-    dropdown.style.display = hasVisible ? 'block' : 'none';
+    
+    if (search.length < 2) {
+        dropdown.innerHTML = '<div class="dropdown-item text-muted">Type at least 2 characters...</div>';
+        dropdown.style.display = 'block';
+        return;
+    }
+    
+    // Show loading
+    dropdown.innerHTML = '<div class="dropdown-item text-muted">Searching...</div>';
+    dropdown.style.display = 'block';
+    
+    fetch(`ajax_handler.php?action=get_student_info&search=${encodeURIComponent(search)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                dropdown.innerHTML = '';
+                
+                if (data.students && data.students.length > 0) {
+                    data.students.forEach(student => {
+                        const option = document.createElement('button');
+                        option.type = 'button';
+                        option.className = 'dropdown-item student-filter-option';
+                        option.textContent = `${student.name} (${student.user_id})`;
+                        option.onclick = () => selectStudentFilter(student.user_id, student.name);
+                        dropdown.appendChild(option);
+                    });
+                } else {
+                    dropdown.innerHTML = '<div class="dropdown-item text-muted">No students found</div>';
+                }
+            } else {
+                dropdown.innerHTML = `<div class="dropdown-item text-danger">${data.message}</div>`;
+            }
+        })
+        .catch(error => {
+            dropdown.innerHTML = '<div class="dropdown-item text-danger">Error searching students</div>';
+        });
 }
+
 
 function showStudentFilterDropdown() {
     const dropdown = document.getElementById('student_filter_dropdown');
@@ -1295,8 +1318,8 @@ document.addEventListener('click', function(event) {
     }
 });
 
-// Load student information via AJAX
-function loadStudentInfo(studentId) {
+// Load student information via AJAX        
+function loadStudentInfo(studentId) {    
     // Show loading state
     document.getElementById('student_info_section').style.display = 'block';
     document.getElementById('info_program').textContent = 'Loading...';
@@ -1305,37 +1328,34 @@ function loadStudentInfo(studentId) {
     document.getElementById('info_student_type').textContent = 'Loading...';
     document.getElementById('info_status').textContent = 'Loading...';
     
-    // Create a simple AJAX request
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', `get_student_info.php?student_id=${encodeURIComponent(studentId)}`, true);
-    xhr.onreadystatechange = function() {
-        if (xhr.readyState === 4 && xhr.status === 200) {
-            try {
-                const data = JSON.parse(xhr.responseText);
-                if (data.success) {
-                    const student = data.student;
-                    document.getElementById('info_program').textContent = student.program || '-';
-                    document.getElementById('info_year_level').textContent = student.year_level || '-';
-                    document.getElementById('info_total_units').textContent = student.total_units || '0';
-                    document.getElementById('info_student_type').textContent = student.student_type || '-';
-                    
-                    const statusBadge = document.getElementById('info_status');
-                    statusBadge.textContent = student.status || '-';
-                    statusBadge.className = student.status === 'active' ? 'badge bg-success' : 'badge bg-danger';
-                    
-                    // Auto-fill units for exam calculation
-                    document.getElementById('units').value = student.total_units || 0;
-                } else {
-                    document.getElementById('student_info_section').style.display = 'none';
-                    console.error('Failed to load student info:', data.message);
-                }
-            } catch (e) {
+    // Use consolidated AJAX handler
+    fetch(`ajax_handler.php?action=get_student_info&student_id=${encodeURIComponent(studentId)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const student = data.student;
+                document.getElementById('info_program').textContent = student.program || '-';
+                document.getElementById('info_year_level').textContent = student.year_level || '-';
+                document.getElementById('info_total_units').textContent = student.total_units || '0';
+                document.getElementById('info_student_type').textContent = student.student_type || '-';
+                
+                const statusBadge = document.getElementById('info_status');
+                statusBadge.textContent = student.status || '-';
+                statusBadge.className = student.status === 'active' ? 'badge bg-success' : 'badge bg-danger';
+                
+                // Auto-fill units for exam calculation
+                document.getElementById('units').value = student.total_units || 0;
+            } else {
                 document.getElementById('student_info_section').style.display = 'none';
-                console.error('Error parsing student info:', e);
+                console.error('Failed to load student info:', data.message);
+                alert('Error loading student information: ' + data.message);
             }
-        }
-    };
-    xhr.send();
+        })
+        .catch(error => {
+            document.getElementById('student_info_section').style.display = 'none';
+            console.error('Error loading student info:', error);
+            alert('Failed to load student information. Please try again.');
+        });
 }
 
 // Payment type handling
