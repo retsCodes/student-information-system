@@ -77,8 +77,6 @@ function renderSidebar($role, $current_page = '') {
         'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard'],
         'manage_users.php' => ['icon' => 'fas fa-users', 'text' => 'Manage Users'],
         'manage_courses.php' => ['icon' => 'fas fa-book', 'text' => 'Course Management'],
-        'manage_subjects.php' => ['icon' => 'fas fa-book-open', 'text' => 'Manage Subjects'],
-        'manage_sections.php' => ['icon' => 'fas fa-layer-group', 'text' => 'Manage Sections'],
         'manage_payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'Manage Payments'],
         'logs.php' => ['icon' => 'fas fa-history', 'text' => 'Activity Logs'],
         'backup.php' => ['icon' => 'fas fa-database', 'text' => 'Backup System']
