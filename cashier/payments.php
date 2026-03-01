@@ -865,7 +865,7 @@ document.addEventListener('click', function(event) {
         dropdown.style.display = 'none';
     }
 });
-
+// TODO: change get_student_info ajax and add a genereal ajax handler (admin for ref)
 // Load student information via AJAX
 function loadStudentInfo(studentId) {
     // Show loading state

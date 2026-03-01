@@ -234,9 +234,6 @@ document.getElementById('studentSearchForm').addEventListener('submit', function
         alert('Please enter at least 2 characters to search.');
         return;
     }
-    
-    // Here you would normally make an AJAX call to search for students
-    // For now, we'll show a placeholder message
     const resultsContainer = document.getElementById('resultsContainer');
     const searchResults = document.getElementById('searchResults');
     
