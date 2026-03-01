@@ -2,8 +2,13 @@
 require_once '../init.php';
 require_once '../theme.php';
 
-$error = '';
-$success = '';
+$errors = [
+    'user_id' => false,
+    'password' => false,
+    'general' => ''
+];
+$user_id = '';
+$password = '';
 
 // Redirect if already logged in as admin
 if (checkSession()) {
@@ -35,21 +40,31 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     
     // Validate CSRF token
     if (!validateCSRFToken($csrf_token)) {
-        $error = 'Invalid security token. Please try again.';
+        $errors['general'] = 'Invalid security token. Please try again.';
     }
     // Validate inputs
-    else if (empty($user_id)) {
-        $error = 'Admin ID is required.';
-    }
-    else if (empty($password)) {
-        $error = 'Password is required.';
-    }
+else if (empty($user_id) && empty($password)) {
+    $errors['user_id'] = true;
+    $errors['password'] = true;
+    $errors['general'] = 'Admin ID and Password are required.';
+}
+else if (empty($user_id)) {
+    $errors['user_id'] = true;
+    $errors['general'] = 'Admin ID is required.';
+}
+else if (empty($password)) {
+    $errors['password'] = true;
+    $errors['general'] = 'Password is required.';
+}
+
     else {
         $ip_address = $_SERVER['REMOTE_ADDR'];
         
         // Check login attempts
         if (!checkLoginAttempts($user_id, $ip_address)) {
-            $error = 'Too many failed login attempts. Please try again later.';
+            $errors['general'] = 'Too many failed login attempts. Please try again later.';
+            $errors['user_id'] = true;
+            $errors['password'] = true;
         } else {
             // Verify credentials - ONLY ADMINS on this page
             $pdo = getDBConnection();
@@ -78,7 +93,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             } else {
                 // Failed login
                 recordLoginAttempt($user_id, $ip_address, false);
-                $error = 'Invalid admin credentials or account is locked.';
+                $errors['general'] = 'Invalid admin credentials or account is locked.';
+                $errors['user_id'] = true;
+                $errors['password'] = true;
             }
         }
     }
@@ -113,28 +130,26 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             </div>
                         </div>
                         
-                        <?php if ($error): ?>
-                            <div class="alert alert-danger">
-                                <i class="fas fa-exclamation-triangle"></i> <?php echo $error; ?>
-                            </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($success): ?>
-                            <div class="alert alert-success">
-                                <i class="fas fa-check-circle"></i> <?php echo $success; ?>
-                            </div>
-                        <?php endif; ?>
-                        
-                        <form method="POST" action="">
+                        <form method="POST" action="" id="adminLoginForm">
                             <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                             
                             <div class="mb-3">
                                 <label for="user_id" class="form-label">
                                     <i class="fas fa-user-shield"></i> Admin ID
                                 </label>
-                                <input type="text" class="form-control" id="user_id" name="user_id" 
-                                       value="<?php echo htmlspecialchars($user_id ?? ''); ?>" 
-                                       placeholder="Enter Admin ID" required>
+                                <input type="text" 
+                                       class="form-control <?php echo $errors['user_id'] ? 'is-invalid' : ''; ?>" 
+                                       id="user_id" 
+                                       name="user_id" 
+                                       value="<?php echo htmlspecialchars($user_id); ?>" 
+                                       placeholder="Enter Admin ID"
+                                       autocomplete="username"
+                                       >
+                                <?php if ($errors['user_id']): ?>
+                                    <div class="invalid-feedback">
+                                        Please enter Admin ID
+                                    </div>
+                                <?php endif; ?>
                             </div>
                             
                             <div class="mb-4">
@@ -142,11 +157,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                     <i class="fas fa-key"></i> Admin Password
                                 </label>
                                 <div class="input-group">
-                                    <input type="password" class="form-control" id="password" name="password" 
-                                           placeholder="Enter Admin Password" required>
+                                    <input type="password" 
+                                           class="form-control <?php echo $errors['password'] ? 'is-invalid' : ''; ?>" 
+                                           id="password" 
+                                           name="password" 
+                                           placeholder="Enter Admin Password"
+                                           autocomplete="current-password"
+                                           >
                                     <button class="btn btn-outline-secondary" type="button" id="togglePassword">
                                         <i class="fas fa-eye"></i>
                                     </button>
+                                    <?php if ($errors['password']): ?>
+                                        <div class="invalid-feedback">
+                                            Please enter Admin Password
+                                        </div>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                             
@@ -192,8 +217,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
         });
         
-        // Auto-focus on user_id field
-        document.getElementById('user_id').focus();
+        // Auto-focus on first field with error or user_id field
+        document.addEventListener('DOMContentLoaded', function() {
+            const errorFields = document.querySelectorAll('.is-invalid');
+            if (errorFields.length > 0) {
+                errorFields[0].focus();
+            } else {
+                document.getElementById('user_id').focus();
+            }
+            
+            // Add shake animation to error fields
+            errorFields.forEach(field => {
+                field.addEventListener('animationend', function() {
+                    this.classList.remove('shake-error');
+                });
+                field.classList.add('shake-error');
+            });
+        });
     </script>
     <style>
         .bg {
@@ -215,6 +255,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
         .card {
             border: 2px solid #dc3545;
+        }
+        .is-invalid {
+            border-color: #dc3545 !important;
+            background-color: #fff5f5;
+        }
+        .shake-error {
+            animation: shake 0.5s ease-in-out;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        .invalid-feedback {
+            display: block;
+            font-size: 0.875em;
+            color: #dc3545;
+        }
+        .form-control:focus.is-invalid {
+            border-color: #dc3545;
+            box-shadow: 0 0 0 0.25rem rgba(220, 53, 69, 0.25);
         }
     </style>
 </body>
