@@ -10,11 +10,17 @@ $user_id = $_SESSION['user_id'];
 $error = '';
 $success = '';
 
-// Get current admin information
-$stmt = $pdo->prepare("SELECT ei.*, u.email as user_email, u.user_status, u.created_at, u.last_active 
-                       FROM employee_info ei 
-                       JOIN users u ON ei.user_id = u.user_id 
-                       WHERE ei.user_id = ?");
+// Check for profile picture success message in session
+if (isset($_SESSION['profile_picture_success'])) {
+    $success = $_SESSION['profile_picture_success'];
+    unset($_SESSION['profile_picture_success']);
+}
+
+// Get current admin information - NOW FROM USERS TABLE
+$stmt = $pdo->prepare("SELECT u.*, ei.number, ei.role as employee_role 
+                       FROM users u 
+                       LEFT JOIN employee_info ei ON u.user_id = ei.user_id 
+                       WHERE u.user_id = ?");
 $stmt->execute([$user_id]);
 $admin_info = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -47,21 +53,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $stmt = $pdo->prepare("UPDATE users SET name = ?, email = ? WHERE user_id = ?");
                             $stmt->execute([$name, $email, $user_id]);
                             
-                            // Update employee_info table
+                            // Update employee_info table (only number, since name/email are in users table)
                             $stmt = $pdo->prepare("UPDATE employee_info SET name = ?, email = ?, number = ? WHERE user_id = ?");
                             $stmt->execute([$name, $email, $number, $user_id]);
                             
-                            // Update session name
+                            // Update session data
                             $_SESSION['name'] = $name;
                             
                             logActivity($user_id, 'Profile Update', 'Updated personal information');
                             $success = 'Profile updated successfully.';
                             
                             // Refresh admin info
-                            $stmt = $pdo->prepare("SELECT ei.*, u.email as user_email, u.user_status, u.created_at, u.last_active 
-                                                   FROM employee_info ei 
-                                                   JOIN users u ON ei.user_id = u.user_id 
-                                                   WHERE ei.user_id = ?");
+                            $stmt = $pdo->prepare("SELECT u.*, ei.number, ei.role as employee_role 
+                                                   FROM users u 
+                                                   LEFT JOIN employee_info ei ON u.user_id = ei.user_id 
+                                                   WHERE u.user_id = ?");
                             $stmt->execute([$user_id]);
                             $admin_info = $stmt->fetch(PDO::FETCH_ASSOC);
                         }
@@ -104,55 +110,139 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 
             case 'upload_profile_picture':
                 if (isset($_FILES['profile_picture']) && $_FILES['profile_picture']['error'] === UPLOAD_ERR_OK) {
-                    $allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
-                    $file_type = $_FILES['profile_picture']['type'];
+                    // Get file info
+                    $file_name = $_FILES['profile_picture']['name'];
+                    $file_tmp = $_FILES['profile_picture']['tmp_name'];
                     $file_size = $_FILES['profile_picture']['size'];
-                    $max_size = 2 * 1024 * 1024; // 2MB
+                    $file_error = $_FILES['profile_picture']['error'];
                     
-                    if (!in_array($file_type, $allowed_types)) {
-                        $error = 'Only JPG, PNG, and GIF images are allowed.';
-                    } elseif ($file_size > $max_size) {
+                    // Get file extension
+                    $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
+                    
+                    // Allowed file types and extensions
+                    $allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'jfif', 'webp'];
+                    $allowed_mime_types = [
+                        'image/jpeg',
+                        'image/jpg', 
+                        'image/png', 
+                        'image/gif',
+                        'image/pjpeg',
+                        'image/x-png',
+                        'image/webp'
+                    ];
+                    
+                    // Get actual MIME type using finfo
+                    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                    $file_mime = finfo_file($finfo, $file_tmp);
+                    finfo_close($finfo);
+                    
+                    // Debug information
+                    error_log("Profile Picture Upload Debug:");
+                    error_log("File name: $file_name");
+                    error_log("File extension: $file_ext");
+                    error_log("File MIME type: $file_mime");
+                    error_log("File size: $file_size bytes");
+                    error_log("File temp: $file_tmp");
+                    
+                    // Check if file extension is allowed
+                    if (!in_array($file_ext, $allowed_extensions)) {
+                        $error = 'Only JPG, JPEG, PNG, GIF, JFIF, and WebP images are allowed.';
+                        error_log("Upload error: Invalid file extension - $file_ext");
+                    }
+                    // Check if MIME type is allowed
+                    elseif (!in_array($file_mime, $allowed_mime_types)) {
+                        $error = 'Invalid image file type. Please upload a valid image.';
+                        error_log("Upload error: Invalid MIME type - $file_mime");
+                    }
+                    // Check file size (2MB max)
+                    elseif ($file_size > 2 * 1024 * 1024) {
                         $error = 'File size must be less than 2MB.';
-                    } else {
+                        error_log("Upload error: File too large - $file_size bytes");
+                    }
+                    // Check for upload errors
+                    elseif ($file_error !== UPLOAD_ERR_OK) {
+                        $upload_errors = [
+                            0 => 'There is no error, the file uploaded with success',
+                            1 => 'The uploaded file exceeds the upload_max_filesize directive in php.ini',
+                            2 => 'The uploaded file exceeds the MAX_FILE_SIZE directive that was specified in the HTML form',
+                            3 => 'The uploaded file was only partially uploaded',
+                            4 => 'No file was uploaded',
+                            6 => 'Missing a temporary folder',
+                            7 => 'Failed to write file to disk.',
+                            8 => 'A PHP extension stopped the file upload.'
+                        ];
+                        $error = 'File upload error: ' . ($upload_errors[$file_error] ?? 'Unknown error');
+                        error_log("Upload error: PHP error code $file_error");
+                    }
+                    else {
                         // Generate unique filename
-                        $file_extension = pathinfo($_FILES['profile_picture']['name'], PATHINFO_EXTENSION);
-                        $filename = 'admin_' . $user_id . '_' . time() . '.' . $file_extension;
-                        $upload_path = '../uploads/profile_pictures/' . $filename;
+                        $filename = 'admin_' . $user_id . '_' . time() . '.' . $file_ext;
+                        $upload_dir = '../uploads/profile_pictures/';
+                        $upload_path = $upload_dir . $filename;
                         
                         // Create directory if it doesn't exist
-                        if (!is_dir('../uploads/profile_pictures/')) {
-                            mkdir('../uploads/profile_pictures/', 0777, true);
+                        if (!is_dir($upload_dir)) {
+                            if (!mkdir($upload_dir, 0777, true)) {
+                                $error = 'Failed to create upload directory.';
+                                error_log("Upload error: Failed to create directory - $upload_dir");
+                            }
                         }
                         
-                        if (move_uploaded_file($_FILES['profile_picture']['tmp_name'], $upload_path)) {
-                            // Delete old profile picture if exists
-                            if (!empty($admin_info['profile_picture'])) {
-                                $old_file = '../uploads/profile_pictures/' . $admin_info['profile_picture'];
-                                if (file_exists($old_file)) {
-                                    unlink($old_file);
+                        // Check if directory is writable
+                        if (is_dir($upload_dir) && !is_writable($upload_dir)) {
+                            $error = 'Upload directory is not writable. Please check permissions.';
+                            error_log("Upload error: Directory not writable - $upload_dir");
+                        }
+                        
+                        if (empty($error)) {
+                            // Move uploaded file
+                            if (move_uploaded_file($file_tmp, $upload_path)) {
+                                // Verify the file is actually an image
+                                $image_info = @getimagesize($upload_path);
+                                if (!$image_info) {
+                                    $error = 'Uploaded file is not a valid image.';
+                                    unlink($upload_path); // Delete invalid file
+                                    error_log("Upload error: Not a valid image file - $upload_path");
+                                } else {
+                                    // Delete old profile picture if exists
+                                    deleteOldProfilePicture($user_id);
+                                    
+                                    // Update database
+                                    if (saveProfilePictureToDatabase($user_id, $filename)) {
+                                        // Update session
+                                        updateProfilePictureInSession($filename);
+                                        loadProfilePictureIntoSession($user_id); // Reload from database
+                                        
+                                        logActivity($user_id, 'Profile Picture', 'Uploaded new profile picture');
+                                        
+                                        // Refresh admin info
+                                        $stmt = $pdo->prepare("SELECT u.*, ei.number, ei.role as employee_role 
+                                                               FROM users u 
+                                                               LEFT JOIN employee_info ei ON u.user_id = ei.user_id 
+                                                               WHERE u.user_id = ?");
+                                        $stmt->execute([$user_id]);
+                                        $admin_info = $stmt->fetch(PDO::FETCH_ASSOC);
+                                        
+                                        // Store success message in session and redirect
+                                        $_SESSION['profile_picture_success'] = 'Profile picture updated successfully.';
+                                        header("Location: " . $_SERVER['PHP_SELF'] . "?refresh=" . time());
+                                        exit();
+                                    } else {
+                                        $error = 'Failed to save profile picture to database.';
+                                        unlink($upload_path); // Delete file if database update failed
+                                        error_log("Upload error: Database update failed for user $user_id");
+                                    }
                                 }
+                            } else {
+                                $error = 'Failed to move uploaded file.';
+                                error_log("Upload error: move_uploaded_file failed - $file_tmp to $upload_path");
                             }
-                            
-                            // Update database
-                            $stmt = $pdo->prepare("UPDATE employee_info SET profile_picture = ? WHERE user_id = ?");
-                            $stmt->execute([$filename, $user_id]);
-                            
-                            logActivity($user_id, 'Profile Picture', 'Uploaded new profile picture');
-                            $success = 'Profile picture updated successfully.';
-                            
-                            // Refresh admin info
-                            $stmt = $pdo->prepare("SELECT ei.*, u.email as user_email, u.user_status, u.created_at, u.last_active 
-                                                   FROM employee_info ei 
-                                                   JOIN users u ON ei.user_id = u.user_id 
-                                                   WHERE ei.user_id = ?");
-                            $stmt->execute([$user_id]);
-                            $admin_info = $stmt->fetch(PDO::FETCH_ASSOC);
-                        } else {
-                            $error = 'Failed to upload profile picture.';
                         }
                     }
                 } else {
-                    $error = 'Please select a valid image file.';
+                    $upload_error = $_FILES['profile_picture']['error'] ?? 'No file selected';
+                    $error = 'Please select a valid image file. Upload error: ' . $upload_error;
+                    error_log("Upload error: No file or upload error - $upload_error");
                 }
                 break;
         }
@@ -170,8 +260,8 @@ try {
     $stmt = $pdo->query("SELECT COUNT(*) as total_students FROM users WHERE role = 'student'");
     $stats['total_students'] = $stmt->fetchColumn();
     
-    // Total employees count
-    $stmt = $pdo->query("SELECT COUNT(*) as total_employees FROM users WHERE role IN ('admin', 'cashier')");
+    // Total employees count (including admin, cashier, registrar)
+    $stmt = $pdo->query("SELECT COUNT(*) as total_employees FROM users WHERE role IN ('admin', 'cashier', 'registrar')");
     $stats['total_employees'] = $stmt->fetchColumn();
     
     // Total payments count
@@ -197,21 +287,6 @@ try {
 renderPageStart('Admin Profile', 'admin', 'profile.php');
 ?>
 
-<div class="row mb-4">
-    <div class="col-md-3 mb-3">
-        <?php echo renderStatsCard('Total Users', $stats['total_users'], 'fas fa-users', 'primary'); ?>
-    </div>
-    <div class="col-md-3 mb-3">
-        <?php echo renderStatsCard('Students', $stats['total_students'], 'fas fa-user-graduate', 'success'); ?>
-    </div>
-    <div class="col-md-3 mb-3">
-        <?php echo renderStatsCard('Employees', $stats['total_employees'], 'fas fa-user-tie', 'info'); ?>
-    </div>
-    <div class="col-md-3 mb-3">
-        <?php echo renderStatsCard('Recent Activity', $stats['recent_activity'], 'fas fa-history', 'warning'); ?>
-    </div>
-</div>
-
 <div class="row">
     <div class="col-md-4 mb-4">
         <!-- Profile Information Card -->
@@ -222,31 +297,54 @@ renderPageStart('Admin Profile', 'admin', 'profile.php');
                 </h5>
             </div>
             <div class="card-body text-center">
-                <?php if (!empty($admin_info['profile_picture'])): ?>
-                    <div class="mb-3">
-                        <img src="../uploads/profile_pictures/<?php echo htmlspecialchars($admin_info['profile_picture']); ?>" 
-                             alt="Profile Picture" class="rounded-circle" style="width: 120px; height: 120px; object-fit: cover;">
+                <!-- Current Profile Picture with Real-time Preview -->
+                <div class="profile-picture-container mb-3">
+                    <div id="profilePicturePreview" class="position-relative">
+                        <?php echo displayProfilePicture('md', 'rounded-circle shadow'); ?>
+                        <div id="previewIndicator" class="position-absolute top-0 end-0 bg-info text-white rounded-circle p-1 d-none" style="width: 24px; height: 24px; font-size: 12px;">
+                            <i class="fas fa-eye"></i>
+                        </div>
                     </div>
-                <?php else: ?>
-                    <div class="avatar-circle mx-auto mb-3" style="width: 120px; height: 120px; font-size: 48px;">
-                        <?php echo strtoupper(substr($admin_info['name'], 0, 1)); ?>
-                    </div>
-                <?php endif; ?>
+                </div>
                 
                 <h5 class="card-title"><?php echo htmlspecialchars($admin_info['name']); ?></h5>
                 <p class="text-muted mb-2"><?php echo htmlspecialchars($user_id); ?></p>
                 <span class="badge bg-primary mb-3"><?php echo ucfirst($admin_info['role']); ?></span>
                 
-                <!-- Profile Picture Upload Form -->
+                <!-- Profile Picture Upload Form with Bootstrap Styling -->
                 <form method="POST" enctype="multipart/form-data" id="profilePictureForm" class="mt-3">
                     <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                     <input type="hidden" name="action" value="upload_profile_picture">
                     
-                    <div class="d-grid gap-2">
-                        <input type="file" id="profile_picture" name="profile_picture" 
-                               accept="image/jpeg,image/jpg,image/png,image/gif" 
-                               class="form-control form-control-sm" onchange="document.getElementById('profilePictureForm').submit()">
-                        <small class="text-muted">JPG, PNG, GIF (Max 2MB)</small>
+                    <!-- Hidden file input for actual upload -->
+                    <input type="file" id="profile_picture" name="profile_picture" 
+                           accept=".jpg,.jpeg,.png,.gif,.jfif,.webp" 
+                           class="d-none">
+                    
+                    <!-- Bootstrap-styled file picker -->
+                    <div class="file-upload-container mb-3">
+                        <div class="input-group">
+                            <button type="button" id="browseButton" class="btn btn-outline-primary">
+                                <i class="fas fa-folder-open me-2"></i> Browse
+                            </button>
+                            <input type="text" id="fileNameDisplay" class="form-control" placeholder="No file selected" readonly>
+                            <button type="button" id="clearFileButton" class="btn btn-outline-secondary d-none">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <small class="text-muted mt-1 d-block">JPG, JPEG, PNG, GIF, JFIF, WebP (Max 2MB)</small>
+                    </div>
+                    
+                    <!-- Action buttons (hidden until file is selected) -->
+                    <div id="actionButtons" class="d-none">
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-success">
+                                <i class="fas fa-save me-2"></i> Save Changes
+                            </button>
+                            <button type="button" id="discardButton" class="btn btn-outline-danger">
+                                <i class="fas fa-times me-2"></i> Discard
+                            </button>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -318,7 +416,7 @@ renderPageStart('Admin Profile', 'admin', 'profile.php');
                         <div class="col-md-6 mb-3">
                             <label for="email" class="form-label">Email Address</label>
                             <input type="email" class="form-control" id="email" name="email" 
-                                   value="<?php echo htmlspecialchars($admin_info['user_email']); ?>" required>
+                                   value="<?php echo htmlspecialchars($admin_info['email']); ?>" required>
                         </div>
                     </div>
                     
@@ -402,28 +500,22 @@ renderPageStart('Admin Profile', 'admin', 'profile.php');
             </div>
             <div class="card-body">
                 <div class="row">
-                    <div class="col-md-3 col-6 mb-3">
+                    <div class="col-md-4 col-6 mb-3">
                         <a href="manage_users.php" class="btn btn-outline-primary w-100">
                             <i class="fas fa-users"></i><br>
                             <small>Manage Users</small>
                         </a>
                     </div>
-                    <div class="col-md-3 col-6 mb-3">
+                    <div class="col-md-4 col-6 mb-3">
                         <a href="logs.php" class="btn btn-outline-info w-100">
                             <i class="fas fa-history"></i><br>
                             <small>View Logs</small>
                         </a>
                     </div>
-                    <div class="col-md-3 col-6 mb-3">
+                    <div class="col-md-4 col-6 mb-3">
                         <a href="backup.php" class="btn btn-outline-success w-100">
                             <i class="fas fa-database"></i><br>
                             <small>Backup System</small>
-                        </a>
-                    </div>
-                    <div class="col-md-3 col-6 mb-3">
-                        <a href="../logout.php" class="btn btn-outline-danger w-100">
-                            <i class="fas fa-sign-out-alt"></i><br>
-                            <small>Logout</small>
                         </a>
                     </div>
                 </div>
@@ -485,6 +577,118 @@ document.getElementById('new_password').addEventListener('input', function() {
     
     indicator.innerHTML = feedback;
 });
+
+// Profile Picture Upload with Real-time Preview
+document.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.getElementById('profile_picture');
+    const browseButton = document.getElementById('browseButton');
+    const fileNameDisplay = document.getElementById('fileNameDisplay');
+    const clearFileButton = document.getElementById('clearFileButton');
+    const actionButtons = document.getElementById('actionButtons');
+    const discardButton = document.getElementById('discardButton');
+    const previewIndicator = document.getElementById('previewIndicator');
+    const profilePicImg = document.querySelector('.profile-picture-container img');
+    const originalProfilePic = profilePicImg ? profilePicImg.src : '';
+    
+    // Browse button click triggers file input
+    if (browseButton && fileInput) {
+        browseButton.addEventListener('click', function() {
+            fileInput.click();
+        });
+    }
+    
+    // File input change event
+    if (fileInput) {
+        fileInput.addEventListener('change', function() {
+            if (this.files && this.files[0]) {
+                const file = this.files[0];
+                const maxSize = 2 * 1024 * 1024; // 2MB
+                
+                // Validate file size
+                if (file.size > maxSize) {
+                    alert('File size must be less than 2MB.');
+                    this.value = '';
+                    resetFileSelection();
+                    return;
+                }
+                
+                // Validate file type
+                const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/jfif', 'image/webp'];
+                if (!validTypes.includes(file.type)) {
+                    alert('Please select a valid image file (JPG, JPEG, PNG, GIF, JFIF, WebP).');
+                    this.value = '';
+                    resetFileSelection();
+                    return;
+                }
+                
+                // Update file name display
+                fileNameDisplay.value = file.name;
+                clearFileButton.classList.remove('d-none');
+                
+                // Show action buttons
+                actionButtons.classList.remove('d-none');
+                
+                // Show preview indicator
+                previewIndicator.classList.remove('d-none');
+                
+                // Create preview
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    if (profilePicImg) {
+                        profilePicImg.src = e.target.result;
+                        profilePicImg.classList.add('preview-active');
+                    }
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+    
+    // Clear file button
+    if (clearFileButton) {
+        clearFileButton.addEventListener('click', function() {
+            resetFileSelection();
+        });
+    }
+    
+    // Discard button
+    if (discardButton) {
+        discardButton.addEventListener('click', function() {
+            resetFileSelection();
+        });
+    }
+    
+    // Function to reset file selection
+    function resetFileSelection() {
+        if (fileInput) {
+            fileInput.value = '';
+        }
+        fileNameDisplay.value = '';
+        clearFileButton.classList.add('d-none');
+        actionButtons.classList.add('d-none');
+        previewIndicator.classList.add('d-none');
+        
+        // Reset profile picture to original
+        if (profilePicImg && originalProfilePic) {
+            profilePicImg.src = originalProfilePic;
+            profilePicImg.classList.remove('preview-active');
+        }
+    }
+    
+    // Check if we need to refresh images after profile picture upload
+    if (window.location.search.includes('refresh')) {
+        // Clear the refresh parameter from URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        // Force reload profile images
+        document.querySelectorAll('img').forEach(img => {
+            if (img.src.includes('profile_pictures')) {
+                const originalSrc = img.src.split('?')[0];
+                img.src = originalSrc + '?t=' + new Date().getTime();
+            }
+        });
+    }
+});
 </script>
 
 <style>
@@ -497,6 +701,66 @@ document.getElementById('new_password').addEventListener('input', function() {
     justify-content: center;
     font-weight: bold;
     margin: 0 auto;
+}
+
+/* Profile picture styling */
+.profile-picture-container img {
+    width: 150px;
+    height: 150px;
+    object-fit: cover;
+    border: 4px solid #dee2e6;
+    transition: all 0.3s ease;
+}
+
+.profile-picture-container img.preview-active {
+    border-color: #0dcaf0;
+    box-shadow: 0 0 15px rgba(13, 202, 240, 0.4);
+}
+
+/* File upload styling */
+.file-upload-container .input-group {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.file-upload-container .form-control {
+    border-left: none;
+}
+
+.file-upload-container .btn-outline-primary:hover {
+    background-color: #0d6efd;
+    color: white;
+}
+
+/* Preview indicator */
+#previewIndicator {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* Action buttons animation */
+#actionButtons {
+    animation: fadeInUp 0.3s ease;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Quick actions styling */
+.quick-action-btn {
+    padding: 15px 5px;
+    transition: all 0.2s ease;
+}
+
+.quick-action-btn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
 }
 </style>
 
