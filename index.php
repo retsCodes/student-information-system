@@ -9,23 +9,23 @@ if (checkSession()) {
     
     switch ($role) {
         case 'admin':
-            redirect('/student\'s-information-system/admin/dashboard.php');
+            redirect('/students_information_system/admin/dashboard.php');
             break;
         case 'cashier':
-            redirect('/student\'s-information-system/cashier/dashboard.php');
+            redirect('/students_information_system/cashier/dashboard.php');
             break;
         case 'student':
-            redirect('/student\'s-information-system/student/dashboard.php');
+            redirect('/students_information_system/student/dashboard.php');
             break;
         case 'registrar':
-            redirect('/student\'s-information-system/registrar/dashboard.php');
+            redirect('/students_information_system/registrar/dashboard.php');
         default:
             // Invalid role, destroy session and redirect to login
             session_destroy();
-            redirect('/student\'s-information-system/login.php');
+            redirect('/students_information_system/login.php');
     }
 } else {
     // User not logged in, redirect to login page
-    redirect('/student\'s-information-system/login.php');
+    redirect('/students_information_system/login.php');
 }
 ?>

@@ -231,7 +231,6 @@ try {
                     p.payment_status,
                     p.issued_date,
                     p.issued_by,
-                    p.payment_type,
                     p.payment_category,
                     p.units,
                     p.remaining_balance,
@@ -339,6 +338,174 @@ try {
             logActivity($user_id, 'Dashboard Access', 'Accessed dashboard via mobile app');
             break;
             
+            // Add after the 'dashboard' case and before 'logout' case
+
+case 'get_payments':
+    $user_id = sanitizeInput($input['user_id'] ?? '');
+    $token = sanitizeInput($input['token'] ?? '');
+    
+    if (empty($user_id) || empty($token)) {
+        throw new Exception('Authentication required');
+    }
+    
+    // Verify token
+    $stmt = $pdo->prepare("
+        SELECT * FROM mobile_tokens 
+        WHERE user_id = ? AND token = ? AND expires_at > NOW()
+    ");
+    $stmt->execute([$user_id, $token]);
+    $tokenData = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$tokenData) {
+        throw new Exception('Invalid or expired session');
+    }
+    
+    // Get all payments
+    $stmt = $pdo->prepare("
+        SELECT 
+            p.*,
+            u.name as issued_by_name
+        FROM payments p
+        LEFT JOIN users u ON p.issued_by = u.user_id
+        WHERE p.student_id = ?
+        ORDER BY p.issued_date DESC
+    ");
+    $stmt->execute([$user_id]);
+    $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $response['success'] = true;
+    $response['data'] = array_map(function($payment) {
+        return [
+            'id' => $payment['id'],
+            'permit_number' => $payment['permit_number'],
+            'amount' => (float) $payment['amount'],
+            'description' => $payment['description'] ?? '',
+            'payment_status' => $payment['payment_status'] ?? 'unpaid',
+            'issued_date' => $payment['issued_date'],
+            'due_date' => $payment['due_date'] ?? null,
+            'receipt_number' => $payment['receipt_number'] ?? null,
+            'remaining_balance' => (float) ($payment['remaining_balance'] ?? 0),
+            'payment_type' => $payment['payment_type'] ?? 'regular',
+            'payment_category' => $payment['payment_category'] ?? 'other',
+            'units' => (int) ($payment['units'] ?? 0),
+            'issued_by' => $payment['issued_by_name'] ?? $payment['issued_by']
+        ];
+    }, $payments);
+    break;
+    
+case 'get_schedule':
+    $user_id = sanitizeInput($input['user_id'] ?? '');
+    $token = sanitizeInput($input['token'] ?? '');
+    
+    if (empty($user_id) || empty($token)) {
+        throw new Exception('Authentication required');
+    }
+    
+    // Verify token
+    $stmt = $pdo->prepare("
+        SELECT * FROM mobile_tokens 
+        WHERE user_id = ? AND token = ? AND expires_at > NOW()
+    ");
+    $stmt->execute([$user_id, $token]);
+    $tokenData = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$tokenData) {
+        throw new Exception('Invalid or expired session');
+    }
+    
+    // Get student info first
+    $stmt = $pdo->prepare("
+        SELECT program, year_level, section 
+        FROM students_info 
+        WHERE user_id = ?
+    ");
+    $stmt->execute([$user_id]);
+    $student = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$student) {
+        throw new Exception('Student record not found');
+    }
+    
+    // Get subjects based on program and year level
+    $stmt = $pdo->prepare("
+        SELECT 
+            subject_code,
+            subject_name,
+            units,
+            description,
+            program,
+            year_level
+        FROM subjects 
+        WHERE program = ? AND year_level = ?
+        ORDER BY subject_code
+    ");
+    $stmt->execute([$student['program'], $student['year_level']]);
+    $subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $response['success'] = true;
+    $response['data'] = array_map(function($subject) use ($student) {
+        return [
+            'subject_code' => $subject['subject_code'],
+            'subject_name' => $subject['subject_name'],
+            'units' => (int) $subject['units'],
+            'description' => $subject['description'] ?? '',
+            'program' => $subject['program'],
+            'year_level' => $subject['year_level'],
+            'section_code' => $student['section'] ?? 'N/A'
+        ];
+    }, $subjects);
+    break;
+    
+case 'get_profile':
+    $user_id = sanitizeInput($input['user_id'] ?? '');
+    $token = sanitizeInput($input['token'] ?? '');
+    
+    if (empty($user_id) || empty($token)) {
+        throw new Exception('Authentication required');
+    }
+    
+    // Verify token
+    $stmt = $pdo->prepare("
+        SELECT * FROM mobile_tokens 
+        WHERE user_id = ? AND token = ? AND expires_at > NOW()
+    ");
+    $stmt->execute([$user_id, $token]);
+    $tokenData = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$tokenData) {
+        throw new Exception('Invalid or expired session');
+    }
+    
+    // Get user profile
+    $stmt = $pdo->prepare("
+        SELECT u.*, si.* 
+        FROM users u 
+        LEFT JOIN students_info si ON u.user_id = si.user_id 
+        WHERE u.user_id = ?
+    ");
+    $stmt->execute([$user_id]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$user) {
+        throw new Exception('User not found');
+    }
+    
+    $response['success'] = true;
+    $response['user'] = [
+        'user_id' => $user['user_id'],
+        'name' => $user['name'],
+        'email' => $user['email'],
+        'role' => $user['role'],
+        'program' => $user['program'] ?? null,
+        'year_level' => $user['year_level'] ?? null,
+        'enrollment_status' => $user['enrollment_status'] ?? 'enrolled',
+        'contact_number' => $user['number'] ?? null,
+        'address' => $user['address'] ?? null,
+        'student_type' => $user['student_type'] ?? 'regular',
+        'total_units' => (int) ($user['total_units'] ?? 0)
+    ];
+    break;
+    
         case 'logout':
             $user_id = sanitizeInput($input['user_id'] ?? '');
             $token = sanitizeInput($input['token'] ?? '');

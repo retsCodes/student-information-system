@@ -42,7 +42,7 @@ A comprehensive web-based Student Information System built with PHP, MySQL, and 
 
 1. **Clone/Download the Project**
    ```
-   Place the project folder in: C:\xampp\htdocs\student's-information-system
+   Place the project folder in: C:\xampp\htdocs\students_information_system
    ```
 
 2. **Start XAMPP Services**
@@ -63,7 +63,7 @@ A comprehensive web-based Student Information System built with PHP, MySQL, and 
      ```
 
 5. **Access the System**
-   - Open: http://localhost/student's-information-system
+   - Open: http://localhost/students_information_system
    - Default admin login:
      - **Username**: ADMIN001
      - **Password**: admin123
@@ -83,7 +83,7 @@ A comprehensive web-based Student Information System built with PHP, MySQL, and 
 ## File Structure
 
 ```
-student's-information-system/
+students_information_system/
 ├── admin/
 │   ├── dashboard.php
 │   └── manage_users.php

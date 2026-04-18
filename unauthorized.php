@@ -19,10 +19,10 @@ require_once 'theme.php';
             <h1 class="display-4">Access Denied</h1>
             <p class="lead">You don't have permission to access this page.</p>
             <div class="mt-4">
-                <a href="/student's-information-system/index.php" class="btn btn-primary">
+                <a href="/students_information_system/index.php" class="btn btn-primary">
                     <i class="fas fa-home"></i> Go to Dashboard
                 </a>
-                <a href="/student's-information-system/login.php" class="btn btn-secondary">
+                <a href="/students_information_system/login.php" class="btn btn-secondary">
                     <i class="fas fa-sign-in-alt"></i> Login
                 </a>
             </div>

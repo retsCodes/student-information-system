@@ -1,6 +1,4 @@
 <?php
-// Student Information System - API Debug Test
-// Place this in: student's-information-system/api_test.php
 
 session_start();
 header('Content-Type: application/json');

@@ -14,21 +14,21 @@ $password = '';
 if (checkSession()) {
     $role = $_SESSION['role'] ?? '';
     if ($role === 'admin') {
-        redirect('/student\'s-information-system/admin/index.php');
+        redirect('/students_information_system/admin/index.php');
     } else {
         // If logged in as non-admin, redirect to their dashboard
         switch ($role) {
             case 'cashier':
-                redirect('/student\'s-information-system/cashier/index.php');
+                redirect('/students_information_system/cashier/index.php');
                 break;
             case 'registrar':
-                redirect('/student\'s-information-system/registrar/index.php');
+                redirect('/students_information_system/registrar/index.php');
                 break;
             case 'student':
-                redirect('/student\'s-information-system/student/index.php');
+                redirect('/students_information_system/student/index.php');
                 break;
             default:
-                redirect('/student\'s-information-system/index.php');
+                redirect('/students_information_system/index.php');
         }
     }
 }
@@ -89,7 +89,7 @@ else if (empty($password)) {
                 logActivity($user['user_id'], 'Admin Login', 'Admin logged in successfully');
                 
                 // Redirect to admin dashboard
-                redirect('/student\'s-information-system/admin/index.php');
+                redirect('/students_information_system/admin/index.php');
             } else {
                 // Failed login
                 recordLoginAttempt($user_id, $ip_address, false);
@@ -180,7 +180,7 @@ else if (empty($password)) {
                             </button>
                             
                             <div class="mt-3 text-center">
-                                <a href="/student's-information-system/index.php" class="text-decoration-none">
+                                <a href="/students_information_system/index.php" class="text-decoration-none">
                                     <i class="fas fa-arrow-left"></i> Back to Main Login
                                 </a>
                             </div>

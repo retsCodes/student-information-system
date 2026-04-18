@@ -39,14 +39,6 @@ $stmt = $pdo->prepare("SELECT p.*, u.name as issued_by_name
 $stmt->execute([$user_id]);
 $recent_payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get current subjects (assuming student is in active sections)
-$stmt = $pdo->prepare("SELECT s.*, sec.section_code, sec.year_level, sec.program
-                       FROM subjects s
-                       JOIN sections sec ON JSON_CONTAINS(s.sections, JSON_QUOTE(sec.section_code))
-                       WHERE JSON_CONTAINS(sec.user_id, JSON_QUOTE(?)) 
-                       AND sec.status = 'active'");
-$stmt->execute([$user_id]);
-$current_subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get recent activities related to this student
 $stmt = $pdo->prepare("SELECT al.*, u.name 

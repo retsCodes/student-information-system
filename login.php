@@ -17,17 +17,17 @@ if (checkSession()) {
     // Redirect to appropriate dashboard based on role
     switch ($role) {
         case 'admin':
-            redirect('/student\'s-information-system/admin/index.php');
+            redirect('/students_information_system/admin/index.php');
             break;
         case 'cashier':
-            redirect('/student\'s-information-system/cashier/index.php');
+            redirect('/students_information_system/cashier/index.php');
             break;
         case 'registrar':
-            redirect('/student\'s-information-system/registrar/index.php');
+            redirect('/students_information_system/registrar/index.php');
             break;
         case 'student':
         default:
-            redirect('/student\'s-information-system/student/index.php');
+            redirect('/students_information_system/student/index.php');
     }
 }
 
@@ -89,14 +89,14 @@ else if (empty($password)) {
                 // Redirect to appropriate dashboard based on role
                 switch ($user['role']) {
                     case 'cashier':
-                        redirect('/student\'s-information-system/cashier/index.php');
+                        redirect('/students_information_system/cashier/index.php');
                         break;
                     case 'registrar':
-                        redirect('/student\'s-information-system/registrar/index.php');
+                        redirect('/students_information_system/registrar/index.php');
                         break;
                     case 'student':
                     default:
-                        redirect('/student\'s-information-system/student/index.php');
+                        redirect('/students_information_system/student/index.php');
                 }
             } else {
                 // Failed login
@@ -185,7 +185,7 @@ else if (empty($password)) {
                             </button>
                             
                             <div class="mt-3 text-center">
-                                <a href="/student's-information-system/admin/login.php" class="text-decoration-none">
+                                <a href="/students_information_system/admin/login.php" class="text-decoration-none">
                                     <i class="fas fa-lock"></i> Admin Login
                                 </a>
                             </div>

@@ -61,7 +61,7 @@ function checkSession() {
 
 function requireAuth() {
     if (!checkSession()) {
-        header('Location: /student\'s-information-system/login.php');
+        header('Location: /students_information_system/login.php');
         exit();
     }
 }
@@ -71,7 +71,7 @@ function requireRole($required_role) {
     if ($_SESSION['role'] !== $required_role) {
         // Log the unauthorized access attempt
         logActivity($_SESSION['user_id'], 'Unauthorized Access', "Attempted to access restricted content requiring role: $required_role");
-        header('Location: /student\'s-information-system/unauthorized.php');
+        header('Location: /students_information_system/unauthorized.php');
         exit();
     }
 }
@@ -135,7 +135,6 @@ function recordLoginAttempt($user_id, $ip_address, $success = false) {
         return false;
     }
 }
-
 // Activity logging
 function logActivity($user_id, $action, $description = '') {
     $pdo = getDBConnection();
@@ -159,10 +158,19 @@ function logActivity($user_id, $action, $description = '') {
             }
         }
         
-        // Use the corrected database structure without log_id
-        $stmt = $pdo->prepare("INSERT INTO activity_logs (user_id, action, description, created_at) VALUES (?, ?, ?, NOW())");
-        $stmt->execute([$final_user_id, $action, $description]);
-        return true;
+        // Generate unique log_id
+        $log_id = 'LOG_' . time() . '_' . uniqid();
+        $ip_address = $_SERVER['REMOTE_ADDR'] ?? '';
+        
+        // Insert with all required fields
+        $stmt = $pdo->prepare("INSERT INTO activity_logs (log_id, user_id, action, description, ip_address, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
+        $result = $stmt->execute([$log_id, $final_user_id, $action, $description, $ip_address]);
+        
+        if (!$result) {
+            error_log("Activity logging failed: " . print_r($stmt->errorInfo(), true));
+        }
+        
+        return $result;
     } catch(PDOException $e) {
         // Log the error but don't break the application
         error_log("Activity logging failed: " . $e->getMessage());

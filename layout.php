@@ -36,7 +36,7 @@ function renderHeader($title, $user_name, $user_role) {
                     <ul class="dropdown-menu dropdown-menu-end">
                         <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user"></i> Profile</a></li>
                         <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-danger" href="/student\'s-information-system/logout.php">
+                        <li><a class="dropdown-item text-danger" href="/students_information_system/logout.php">
                             <i class="fas fa-sign-out-alt"></i> Logout
                         </a></li>
                     </ul>

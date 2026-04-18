@@ -9,6 +9,24 @@ $pdo = getDBConnection();
 $error = '';
 $success = '';
 
+// Get programs for dropdown
+$programs = $pdo->query("SELECT DISTINCT program FROM subjects WHERE program IS NOT NULL AND program != '' ORDER BY program")->fetchAll(PDO::FETCH_COLUMN);
+if (empty($programs)) {
+    $programs = ['BS Information Technology', 'BS Computer Science', 'BS Business Administration', 'BS Accountancy', 'BS Criminology', 'BS Psychology', 'BS Secondary Education', 'Associate in Computer Technology'];
+}
+
+// Get program codes mapping
+$program_codes = [
+    'BS Information Technology' => '01',
+    'BS Computer Science' => '02',
+    'BS Business Administration' => '03',
+    'BS Accountancy' => '04',
+    'BS Criminology' => '05',
+    'BS Psychology' => '06',
+    'BS Secondary Education' => '07',
+    'Associate in Computer Technology' => '08'
+];
+
 // Handle user actions
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (!validateCSRFToken($_POST['csrf_token'] ?? '')) {
@@ -28,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     
                     $stmt = $pdo->prepare("UPDATE users SET user_status = ? WHERE user_id = ?");
                     if ($stmt->execute([$new_status, $user_id])) {
-                        logActivity($_SESSION['user_id'], 'User Status Change', 
+                        logActivity($_SESSION['user_id'], 'User Status Changed', 
                                    "Changed user {$user_id} status from {$current_status} to {$new_status}");
                         $success = "User status updated successfully.";
                     } else {
@@ -44,6 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $password = $_POST['password'] ?? '';
                 
                 // Student-only fields
+                $student_id = sanitizeInput($_POST['student_id'] ?? '');
                 $program = sanitizeInput($_POST['program'] ?? '');
                 $year_level = intval($_POST['year_level'] ?? 0);
                 
@@ -57,9 +76,25 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $error = 'Password must be at least 6 characters.';
                 } else {
                     try {
-                        // Generate user ID based on role
+                        // For student role, validate the manually entered ID
                         if ($role === 'student') {
-                            $new_user_id = generateStudentID();
+                            if (empty($student_id)) {
+                                $error = 'Student ID is required.';
+                            } elseif (!preg_match('/^C[0-9]{2}-[0-9]{2}-[0-9]{4}-MAN121$/', $student_id)) {
+                                $error = 'Invalid Student ID format. Use format: CYY-PP-NNNN-MAN121 (e.g., C24-01-0001-MAN121)';
+                            } else {
+                                $stmt = $pdo->prepare("SELECT id FROM users WHERE user_id = ?");
+                                $stmt->execute([$student_id]);
+                                if ($stmt->fetch()) {
+                                    $error = 'Student ID already exists.';
+                                }
+                            }
+                            
+                            if (empty($program)) {
+                                $error = 'Program is required for student.';
+                            }
+                            
+                            $new_user_id = $student_id;
                         } else {
                             $prefix = strtoupper($role);
                             $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE role = ?");
@@ -68,33 +103,37 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $new_user_id = $prefix . str_pad($count, 3, '0', STR_PAD_LEFT);
                         }
                         
-                        // Check if email already exists
-                        $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
-                        $stmt->execute([$email]);
-                        if ($stmt->fetch()) {
-                            $error = 'Email already exists.';
-                        } else {
-                            $hashed_password = hashPassword($password);
-                            
-                            // Insert user
-                            $stmt = $pdo->prepare("INSERT INTO users (user_id, name, email, password, role) VALUES (?, ?, ?, ?, ?)");
-                            $stmt->execute([$new_user_id, $name, $email, $hashed_password, $role]);
-                            
-                            // Insert additional info based on role
-                            if ($role === 'student') {
-                                // Save program and year_level (may be empty)
-                                $stmt = $pdo->prepare("INSERT INTO students_info (user_id, name, email, program, year_level) VALUES (?, ?, ?, ?, ?)");
-                                $stmt->execute([$new_user_id, $name, $email, $program, $year_level]);
+                        if (empty($error)) {
+                            $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
+                            $stmt->execute([$email]);
+                            if ($stmt->fetch()) {
+                                $error = 'Email already exists.';
                             } else {
-                                $stmt = $pdo->prepare("INSERT INTO employee_info (user_id, name, email, role) VALUES (?, ?, ?, ?)");
-                                $stmt->execute([$new_user_id, $name, $email, ucfirst($role)]);
+                                $hashed_password = hashPassword($password);
+                                
+                                $pdo->beginTransaction();
+                                
+                                $stmt = $pdo->prepare("INSERT INTO users (user_id, name, email, password, role, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
+                                $stmt->execute([$new_user_id, $name, $email, $hashed_password, $role]);
+                                
+                                if ($role === 'student') {
+                                    $stmt = $pdo->prepare("INSERT INTO students_info (user_id, name, email, program, year_level, enrollment_date, student_status, created_at) VALUES (?, ?, ?, ?, ?, NOW(), 'new', NOW())");
+                                    $stmt->execute([$new_user_id, $name, $email, $program, $year_level]);
+                                } else {
+                                    $stmt = $pdo->prepare("INSERT INTO employee_info (user_id, name, email, role, created_at) VALUES (?, ?, ?, ?, NOW())");
+                                    $stmt->execute([$new_user_id, $name, $email, ucfirst($role)]);
+                                }
+                                
+                                $pdo->commit();
+                                
+                                logActivity($_SESSION['user_id'], 'User Created', 
+                                           "Created new {$role} user: {$new_user_id} - {$name}" .
+                                           ($role === 'student' ? " | Program: {$program} | Year: {$year_level}" : ""));
+                                $success = "User created successfully. User ID: {$new_user_id}";
                             }
-                            
-                            logActivity($_SESSION['user_id'], 'User Created', 
-                                       "Created new {$role} user: {$new_user_id} - {$name}");
-                            $success = "User created successfully. User ID: {$new_user_id}";
                         }
                     } catch(Exception $e) {
+                        if ($pdo->inTransaction()) $pdo->rollBack();
                         $error = "Failed to create user: " . $e->getMessage();
                     }
                 }
@@ -111,15 +150,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     try {
                         $pdo->beginTransaction();
                         
-                        // Remove existing section mappings
                         $stmt = $pdo->prepare("DELETE FROM student_sections WHERE student_id = ?");
                         $stmt->execute([$student_id]);
                         
-                        // Remove existing subject mappings
                         $stmt = $pdo->prepare("DELETE FROM student_subjects WHERE student_id = ?");
                         $stmt->execute([$student_id]);
                         
-                        // Insert new section mappings
                         $stmt = $pdo->prepare("INSERT INTO student_sections (student_id, section_id) VALUES (?, ?)");
                         foreach ($section_ids as $section_id) {
                             $section_id = intval($section_id);
@@ -128,7 +164,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             }
                         }
                         
-                        // Insert selected subjects
                         if (!empty($subject_ids)) {
                             $stmt = $pdo->prepare("INSERT INTO student_subjects (student_id, subject_id) VALUES (?, ?)");
                             foreach ($subject_ids as $subject_id) {
@@ -139,15 +174,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             }
                         }
                         
-                        // Update student type (regular/irregular)
                         $student_type = count($section_ids) > 1 ? 'irregular' : 'regular';
                         $stmt = $pdo->prepare("UPDATE students_info SET student_type = ? WHERE user_id = ?");
                         $stmt->execute([$student_type, $student_id]);
                         
                         $pdo->commit();
                         
-                        logActivity($_SESSION['user_id'], 'Assign Section', 
-                                   "Assigned " . count($section_ids) . " sections and " . count($subject_ids) . " subjects to student {$student_id}");
+                        logActivity($_SESSION['user_id'], 'Sections Assigned', 
+                                   "Assigned " . count($section_ids) . " sections and " . count($subject_ids) . " subjects to student {$student_id}. Student type: {$student_type}");
                         $success = 'Sections and subjects assigned successfully. Student marked as ' . $student_type . '.';
                         
                     } catch (Exception $e) {
@@ -161,6 +195,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $edit_user_id = sanitizeInput($_POST['edit_user_id'] ?? '');
                 $name = sanitizeInput($_POST['name'] ?? '');
                 $email = sanitizeInput($_POST['email'] ?? '');
+                $role = sanitizeInput($_POST['edit_user_role'] ?? '');
+                $student_id = sanitizeInput($_POST['student_id'] ?? '');
+                $program = sanitizeInput($_POST['program'] ?? '');
+                $year_level = intval($_POST['year_level'] ?? 0);
                 
                 if (empty($edit_user_id)) {
                     $error = 'Invalid user ID.';
@@ -169,94 +207,215 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 } elseif (empty($email) || !validateEmail($email)) {
                     $error = 'Valid email is required.';
                 } else {
-                    // Check if email is already used by another user
-                        $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ? AND user_id != ?");
+                    $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ? AND user_id != ?");
                     $stmt->execute([$email, $edit_user_id]);
                     if ($stmt->fetch()) {
                         $error = 'Email is already used by another user.';
                     } else {
                         try {
-                            // Get old user info for logging
                             $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ?");
                             $stmt->execute([$edit_user_id]);
                             $old_user = $stmt->fetch(PDO::FETCH_ASSOC);
                             
-                            // Update users table
-                            $stmt = $pdo->prepare("UPDATE users SET name = ?, email = ? WHERE user_id = ?");
-                            $stmt->execute([$name, $email, $edit_user_id]);
-                            
-                            // Update additional info based on role
-                            if ($old_user['role'] === 'student') {
-                                // If program/year were sent (optional), update them
-                                $program = sanitizeInput($_POST['program'] ?? '');
-                                $year_level = intval($_POST['year_level'] ?? 0);
-                                $stmt = $pdo->prepare("UPDATE students_info SET name = ?, email = ?, program = ?, year_level = ? WHERE user_id = ?");
-                                $stmt->execute([$name, $email, $program, $year_level, $edit_user_id]);
+                            if (!$old_user) {
+                                $error = 'User not found.';
                             } else {
-                                $stmt = $pdo->prepare("UPDATE employee_info SET name = ?, email = ? WHERE user_id = ?");
-                                $stmt->execute([$name, $email, $edit_user_id]);
+                                $pdo->beginTransaction();
+                                
+                                $final_user_id = $edit_user_id;
+                                $old_program = null;
+                                $old_year_level = null;
+                                
+                                if ($role === 'student' && !empty($student_id)) {
+                                    if (!preg_match('/^C[0-9]{2}-[0-9]{2}-[0-9]{4}-MAN121$/', $student_id)) {
+                                        $error = 'Invalid Student ID format.';
+                                    } elseif ($student_id !== $edit_user_id) {
+                                        $stmt = $pdo->prepare("SELECT id FROM users WHERE user_id = ?");
+                                        $stmt->execute([$student_id]);
+                                        if ($stmt->fetch()) {
+                                            $error = 'Student ID already exists.';
+                                        } else {
+                                            $final_user_id = $student_id;
+                                        }
+                                    }
+                                    
+                                    // Get old student info for logging
+                                    $stmt = $pdo->prepare("SELECT program, year_level FROM students_info WHERE user_id = ?");
+                                    $stmt->execute([$edit_user_id]);
+                                    $old_student = $stmt->fetch(PDO::FETCH_ASSOC);
+                                    $old_program = $old_student['program'] ?? '';
+                                    $old_year_level = $old_student['year_level'] ?? '';
+                                }
+                                
+                                if (empty($error)) {
+                                    $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+                                    
+                                    if ($final_user_id !== $edit_user_id) {
+                                        $stmt = $pdo->prepare("UPDATE users SET user_id = ?, name = ?, email = ? WHERE user_id = ?");
+                                        $stmt->execute([$final_user_id, $name, $email, $edit_user_id]);
+                                        
+                                        $stmt = $pdo->prepare("UPDATE students_info SET user_id = ?, name = ?, email = ?, program = ?, year_level = ? WHERE user_id = ?");
+                                        $stmt->execute([$final_user_id, $name, $email, $program, $year_level, $edit_user_id]);
+                                        
+                                        $stmt = $pdo->prepare("UPDATE student_sections SET student_id = ? WHERE student_id = ?");
+                                        $stmt->execute([$final_user_id, $edit_user_id]);
+                                        
+                                        $stmt = $pdo->prepare("UPDATE student_subjects SET student_id = ? WHERE student_id = ?");
+                                        $stmt->execute([$final_user_id, $edit_user_id]);
+                                        
+                                        $stmt = $pdo->prepare("UPDATE student_course_enrollment SET student_id = ? WHERE student_id = ?");
+                                        $stmt->execute([$final_user_id, $edit_user_id]);
+                                        
+                                        $stmt = $pdo->prepare("UPDATE payments SET student_id = ? WHERE student_id = ?");
+                                        $stmt->execute([$final_user_id, $edit_user_id]);
+                                        
+                                        $stmt = $pdo->prepare("UPDATE transaction_history SET student_id = ? WHERE student_id = ?");
+                                        $stmt->execute([$final_user_id, $edit_user_id]);
+                                        
+                                        $stmt = $pdo->prepare("UPDATE activity_logs SET user_id = ? WHERE user_id = ?");
+                                        $stmt->execute([$final_user_id, $edit_user_id]);
+                                    } else {
+                                        $stmt = $pdo->prepare("UPDATE users SET name = ?, email = ? WHERE user_id = ?");
+                                        $stmt->execute([$name, $email, $edit_user_id]);
+                                        
+                                        if ($old_user['role'] === 'student') {
+                                            $stmt = $pdo->prepare("UPDATE students_info SET name = ?, email = ?, program = ?, year_level = ? WHERE user_id = ?");
+                                            $stmt->execute([$name, $email, $program, $year_level, $edit_user_id]);
+                                        } else {
+                                            $stmt = $pdo->prepare("UPDATE employee_info SET name = ?, email = ? WHERE user_id = ?");
+                                            $stmt->execute([$name, $email, $edit_user_id]);
+                                        }
+                                    }
+                                    
+                                    $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+                                    $pdo->commit();
+                                    
+                                    // Build detailed log message
+                                    $changes = [];
+                                    if ($old_user['name'] !== $name) $changes[] = "name: '{$old_user['name']}' → '{$name}'";
+                                    if ($old_user['email'] !== $email) $changes[] = "email: '{$old_user['email']}' → '{$email}'";
+                                    if ($final_user_id !== $edit_user_id) $changes[] = "user_id: '{$edit_user_id}' → '{$final_user_id}'";
+                                    if ($role === 'student') {
+                                        if ($old_program !== $program) $changes[] = "program: '{$old_program}' → '{$program}'";
+                                        if ($old_year_level != $year_level) $changes[] = "year_level: {$old_year_level} → {$year_level}";
+                                    }
+                                    
+                                    logActivity($_SESSION['user_id'], 'User Updated', 
+                                               "Updated user: " . implode(", ", $changes));
+                                    $success = 'User updated successfully.' . ($final_user_id !== $edit_user_id ? " User ID changed to: {$final_user_id}" : '');
+                                }
                             }
-                            
-                            logActivity($_SESSION['user_id'], 'User Updated', 
-                                       "Updated user {$edit_user_id}: name from '{$old_user['name']}' to '{$name}', email from '{$old_user['email']}' to '{$email}'");
-                            $success = 'User updated successfully.';
                         } catch(Exception $e) {
+                            if ($pdo->inTransaction()) $pdo->rollBack();
+                            $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
                             $error = 'Failed to update user: ' . $e->getMessage();
                         }
                     }
                 }
                 break;
-                
-            case 'delete_user':
-                $delete_user_id = sanitizeInput($_POST['delete_user_id'] ?? '');
-                
-                if (empty($delete_user_id)) {
-                    $error = 'Invalid user ID.';
-                } elseif ($delete_user_id === $_SESSION['user_id']) {
-                    $error = 'Cannot delete your own account.';
-                } else {
-                    // Get user info
-                    $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ?");
-                    $stmt->execute([$delete_user_id]);
-                    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+                case 'delete_user':
+                    $delete_user_id = sanitizeInput($_POST['delete_user_id'] ?? '');
                     
-                    if (!$user) {
-                        $error = 'User not found.';
+                    if (empty($delete_user_id)) {
+                        $error = 'Invalid user ID.';
+                    } elseif ($delete_user_id === $_SESSION['user_id']) {
+                        $error = 'Cannot delete your own account.';
                     } else {
-                        // Check if user has payments (for students) or issued payments (for cashiers/admins)
-                        if ($user['role'] === 'student') {
-                            $stmt = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE student_id = ?");
-                            $stmt->execute([$delete_user_id]);
-                            $payment_count = $stmt->fetchColumn();
-                            
-                            if ($payment_count > 0) {
-                                $error = 'Cannot delete student: Student has payment records.';
-                            }
-                        } else {
-                            $stmt = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE issued_by = ?");
-                            $stmt->execute([$delete_user_id]);
-                            $issued_count = $stmt->fetchColumn();
-                            
-                            if ($issued_count > 0) {
-                                $error = 'Cannot delete user: User has issued payment records.';
-                            }
-                        }
+                        $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ?");
+                        $stmt->execute([$delete_user_id]);
+                        $user = $stmt->fetch(PDO::FETCH_ASSOC);
                         
-                        if (empty($error)) {
+                        if (!$user) {
+                            $error = 'User not found.';
+                        } else {
                             try {
-                                // Delete user (CASCADE will handle related tables)
+                                // LOG FIRST - before deleting the user
+                                logActivity($_SESSION['user_id'], 'User Deleted', 
+                                           "Deleted user: {$delete_user_id} - {$user['name']} ({$user['role']})");
+                                
+                                $pdo->beginTransaction();
+                                
+                                // Disable foreign key checks temporarily
+                                $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+                                
+                                if ($user['role'] === 'student') {
+                                    // Delete student_sections
+                                    $stmt = $pdo->prepare("DELETE FROM student_sections WHERE student_id = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                    
+                                    // Delete student_subjects
+                                    $stmt = $pdo->prepare("DELETE FROM student_subjects WHERE student_id = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                    
+                                    // Delete student_course_enrollment
+                                    $stmt = $pdo->prepare("DELETE FROM student_course_enrollment WHERE student_id = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                    
+                                    // Delete student_curriculum_adjustments
+                                    $stmt = $pdo->prepare("DELETE FROM student_curriculum_adjustments WHERE student_id = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                    
+                                    // Delete payments and their installments
+                                    $stmt = $pdo->prepare("SELECT id FROM payments WHERE student_id = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                    $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                                    
+                                    foreach ($payments as $payment) {
+                                        $stmt2 = $pdo->prepare("DELETE FROM payment_installments WHERE payment_id = ?");
+                                        $stmt2->execute([$payment['id']]);
+                                    }
+                                    
+                                    $stmt = $pdo->prepare("DELETE FROM payments WHERE student_id = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                    
+                                    // Delete transaction_history
+                                    $stmt = $pdo->prepare("DELETE FROM transaction_history WHERE student_id = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                    
+                                    // Delete students_info
+                                    $stmt = $pdo->prepare("DELETE FROM students_info WHERE user_id = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                } else {
+                                    // For employees
+                                    $stmt = $pdo->prepare("SELECT id FROM payments WHERE issued_by = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                    $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                                    
+                                    foreach ($payments as $payment) {
+                                        $stmt2 = $pdo->prepare("DELETE FROM payment_installments WHERE payment_id = ?");
+                                        $stmt2->execute([$payment['id']]);
+                                    }
+                                    
+                                    $stmt = $pdo->prepare("DELETE FROM payments WHERE issued_by = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                    
+                                    $stmt = $pdo->prepare("DELETE FROM transaction_history WHERE issued_by = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                    
+                                    $stmt = $pdo->prepare("DELETE FROM employee_info WHERE user_id = ?");
+                                    $stmt->execute([$delete_user_id]);
+                                }
+                                
+                                // Delete activity_logs (but keep the deletion log we just created)
+                                $stmt = $pdo->prepare("DELETE FROM activity_logs WHERE user_id = ? AND action != 'User Deleted'");
+                                $stmt->execute([$delete_user_id]);
+                                
+                                // Finally delete the user
                                 $stmt = $pdo->prepare("DELETE FROM users WHERE user_id = ?");
                                 $stmt->execute([$delete_user_id]);
                                 
-                                logActivity($_SESSION['user_id'], 'User Deleted', "Deleted user: {$delete_user_id} - {$user['name']} ({$user['role']})");
+                                $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+                                $pdo->commit();
+                                
                                 $success = 'User deleted successfully.';
-                            } catch(Exception $e) {
+                            } catch (Exception $e) {
+                                if ($pdo->inTransaction()) $pdo->rollBack();
+                                $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
                                 $error = 'Failed to delete user: ' . $e->getMessage();
                             }
                         }
                     }
-                }
-                break;
+                    break;
                 
             case 'reset_password':
                 $reset_user_id = sanitizeInput($_POST['reset_user_id'] ?? '');
@@ -272,7 +431,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         $stmt = $pdo->prepare("UPDATE users SET password = ? WHERE user_id = ?");
                         $stmt->execute([$hashed_password, $reset_user_id]);
                         
-                        logActivity($_SESSION['user_id'], 'Password Reset', "Admin reset password for user: {$reset_user_id}");
+                        logActivity($_SESSION['user_id'], 'Password Reset', 
+                                   "Reset password for user: {$reset_user_id}");
                         $success = 'Password reset successfully.';
                     } catch(Exception $e) {
                         $error = 'Failed to reset password: ' . $e->getMessage();
@@ -287,13 +447,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 $role_filter = $_GET['role'] ?? '';
 $status_filter = $_GET['status'] ?? '';
 $search = $_GET['search'] ?? '';
+$program_filter = $_GET['program_filter'] ?? '';
+$year_filter = $_GET['year_filter'] ?? '';
+$student_type_filter = $_GET['student_type_filter'] ?? '';
+
+// Log filter usage
+$filters_applied = !empty($role_filter) || !empty($status_filter) || !empty($search) || 
+                   !empty($program_filter) || !empty($year_filter) || !empty($student_type_filter);
+
+if ($filters_applied && $_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_SESSION['last_filter_log_' . md5(serialize($_GET))])) {
+    $filter_details = [];
+    if (!empty($role_filter)) $filter_details[] = "role={$role_filter}";
+    if (!empty($status_filter)) $filter_details[] = "status={$status_filter}";
+    if (!empty($program_filter)) $filter_details[] = "program={$program_filter}";
+    if (!empty($year_filter)) $filter_details[] = "year={$year_filter}";
+    if (!empty($student_type_filter)) $filter_details[] = "student_type={$student_type_filter}";
+    if (!empty($search)) $filter_details[] = "search={$search}";
+    
+    logActivity($_SESSION['user_id'], 'Users Filtered', 
+               "Applied filters: " . implode(", ", $filter_details));
+    
+    $_SESSION['last_filter_log_' . md5(serialize($_GET))] = time();
+}
 
 // Pagination settings
 $per_page = 20;
 $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
 $offset = ($page - 1) * $per_page;
 
-// Build query for total count
+// Build query conditions
 $where_conditions = [];
 $params = [];
 
@@ -307,6 +489,21 @@ if (!empty($status_filter)) {
     $params[] = $status_filter;
 }
 
+if (!empty($program_filter)) {
+    $where_conditions[] = "si.program = ?";
+    $params[] = $program_filter;
+}
+
+if (!empty($year_filter)) {
+    $where_conditions[] = "si.year_level = ?";
+    $params[] = $year_filter;
+}
+
+if (!empty($student_type_filter)) {
+    $where_conditions[] = "si.student_type = ?";
+    $params[] = $student_type_filter;
+}
+
 if (!empty($search)) {
     $where_conditions[] = "(u.name LIKE ? OR u.email LIKE ? OR u.user_id LIKE ?)";
     $search_param = "%{$search}%";
@@ -317,7 +514,7 @@ if (!empty($search)) {
 
 $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
 
-// Get total count for pagination
+// Get total count
 $count_query = "SELECT COUNT(*) as total 
                 FROM users u
                 LEFT JOIN students_info si ON u.user_id = si.user_id
@@ -329,31 +526,21 @@ $stmt->execute($params);
 $total_count = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 $total_pages = ceil($total_count / $per_page);
 
-// Get users with additional info (with pagination)
+// Get users - FIXED: Using proper parameter binding with LIMIT and OFFSET
 $query = "SELECT u.*, 
                  COALESCE(si.program, ei.role) as additional_info,
                  COALESCE(si.year_level, '') as year_level,
-                 si.student_type
+                 si.student_type,
+                 si.enrollment_status
           FROM users u
           LEFT JOIN students_info si ON u.user_id = si.user_id
           LEFT JOIN employee_info ei ON u.user_id = ei.user_id
           {$where_clause}
           ORDER BY u.created_at DESC
-          LIMIT :limit OFFSET :offset";
+          LIMIT " . intval($per_page) . " OFFSET " . intval($offset);
 
 $stmt = $pdo->prepare($query);
-
-// Bind pagination parameters
-$stmt->bindValue(':limit', $per_page, PDO::PARAM_INT);
-$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-
-// Bind filter parameters
-$param_index = 1;
-foreach ($params as $param) {
-    $stmt->bindValue($param_index++, $param);
-}
-
-$stmt->execute();
+$stmt->execute($params);
 $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Load sections, subjects and current assignments
@@ -373,7 +560,7 @@ $subjectDetailsMap = [];
 foreach ($subjects as $subject) {
     $subjectDetailsMap[$subject['id']] = $subject;
     
-    $stmt = $pdo->prepare("SELECT sections FROM subjects WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT subjects FROM sections WHERE id = ?");
     $stmt->execute([$subject['id']]);
     $sections_json = $stmt->fetchColumn();
     
@@ -390,25 +577,25 @@ foreach ($subjects as $subject) {
     }
 }
 
-// student -> section map (multiple sections per student)
+// student -> section map
 $student_section_map = [];
 $stmt = $pdo->query("SELECT student_id, section_id FROM student_sections");
 while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
     $student_section_map[$r['student_id']][] = $r['section_id'];
 }
 
-// student -> [subject_id,...] map
+// student -> subject map
 $student_subjects_map = [];
 $stmt = $pdo->query("SELECT student_id, subject_id FROM student_subjects");
 while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
     $student_subjects_map[$r['student_id']][] = $r['subject_id'];
 }
 
-// Calculate starting number for pagination
 $start_number = $offset + 1;
 
 renderPageStart('Manage Users', 'admin', 'manage_users.php');
 ?>
+
 
 <style>
 .section-card {
@@ -578,12 +765,14 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
         <i class="fas fa-check-circle"></i> <?php echo $success; ?>
     </div>
 <?php endif; ?>
-
 <!-- Filters -->
 <div class="card mb-4">
+    <div class="card-header bg-light">
+        <h6 class="mb-0"><i class="fas fa-filter me-2"></i>Filter Users</h6>
+    </div>
     <div class="card-body">
-        <form method="GET" class="row g-3">
-            <div class="col-md-3">
+        <form method="GET" class="row g-3" id="filterForm">
+            <div class="col-md-2">
                 <label for="role" class="form-label">Role</label>
                 <select class="form-select" id="role" name="role">
                     <option value="">All Roles</option>
@@ -593,7 +782,7 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                     <option value="registrar" <?php echo $role_filter === 'registrar' ? 'selected' : ''; ?>>Registrar</option>
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label for="status" class="form-label">Status</label>
                 <select class="form-select" id="status" name="status">
                     <option value="">All Status</option>
@@ -601,17 +790,47 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                     <option value="locked" <?php echo $status_filter === 'locked' ? 'selected' : ''; ?>>Locked</option>
                 </select>
             </div>
-            <div class="col-md-4">
-                <label for="search" class="form-label">Search</label>
-                <input type="text" class="form-control" id="search" name="search" 
-                       value="<?php echo htmlspecialchars($search); ?>" 
-                       placeholder="Name, Email, or User ID">
+            <div class="col-md-3">
+                <label for="program_filter" class="form-label">Program (Student only)</label>
+                <select class="form-select" id="program_filter" name="program_filter">
+                    <option value="">All Programs</option>
+                    <?php foreach($programs as $program): ?>
+                        <option value="<?php echo htmlspecialchars($program); ?>" <?php echo ($_GET['program_filter'] ?? '') === $program ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($program); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
             <div class="col-md-2">
-                <label class="form-label">&nbsp;</label>
-                <div class="d-grid">
+                <label for="year_filter" class="form-label">Year Level</label>
+                <select class="form-select" id="year_filter" name="year_filter">
+                    <option value="">All Years</option>
+                    <?php for ($i = 1; $i <= 6; $i++): ?>
+                        <option value="<?php echo $i; ?>" <?php echo ($_GET['year_filter'] ?? '') == $i ? 'selected' : ''; ?>>
+                            Year <?php echo $i; ?>
+                        </option>
+                    <?php endfor; ?>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="student_type_filter" class="form-label">Student Type</label>
+                <select class="form-select" id="student_type_filter" name="student_type_filter">
+                    <option value="">All Types</option>
+                    <option value="regular" <?php echo ($_GET['student_type_filter'] ?? '') === 'regular' ? 'selected' : ''; ?>>Regular</option>
+                    <option value="irregular" <?php echo ($_GET['student_type_filter'] ?? '') === 'irregular' ? 'selected' : ''; ?>>Irregular</option>
+                </select>
+            </div>
+            <div class="col-md-12">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="fas fa-search"></i></span>
+                    <input type="text" class="form-control" id="search" name="search" 
+                           value="<?php echo htmlspecialchars($search); ?>" 
+                           placeholder="Search by Name, Email, or User ID...">
                     <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-search"></i> Filter
+                        <i class="fas fa-search me-1"></i> Filter
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="clearFilters()">
+                        <i class="fas fa-undo me-1"></i> Clear
                     </button>
                 </div>
             </div>
@@ -1023,7 +1242,7 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
 <div class="modal fade" id="addUserModal" tabindex="-1" aria-labelledby="addUserModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <form method="POST" id="addUserForm">
+            <form method="POST" id="addUserForm" onsubmit="return validateStudentID()">
                 <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                 <input type="hidden" name="action" value="add_user">
                 
@@ -1065,18 +1284,70 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
 
                         <!-- Student-only fields (hidden unless role = student) -->
                         <div id="studentFields" style="display:none;">
-                            <div class="col-md-6 mb-3">
-                                <label for="program" class="form-label">Program</label>
-                                <input type="text" class="form-control" id="program" name="program" placeholder="e.g., BSIT">
+                            <div class="col-md-12 mb-3">
+                                <label class="form-label">Student ID</label>
+                                <div class="row g-2">
+                                    <div class="col-auto">
+                                        <div class="input-group">
+                                            <span class="input-group-text bg-light"><strong>C</strong></span>
+                                            <input type="text" class="form-control" id="student_year" name="student_year" 
+                                                   placeholder="YY" maxlength="2" size="2" style="width: 70px;"
+                                                   oninput="updateStudentID()">
+                                        </div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <span class="align-middle">-</span>
+                                    </div>
+                                    <div class="col-auto">
+                                        <input type="text" class="form-control" id="student_program_code" name="student_program_code" 
+                                               placeholder="PP" maxlength="2" size="2" style="width: 70px;"
+                                               oninput="updateStudentIDFromCode()">
+                                    </div>
+                                    <div class="col-auto">
+                                        <span class="align-middle">-</span>
+                                    </div>
+                                    <div class="col-auto">
+                                        <input type="text" class="form-control" id="student_number" name="student_number" 
+                                               placeholder="NNNN" maxlength="4" size="4" style="width: 100px;"
+                                               oninput="updateStudentID()">
+                                    </div>
+                                    <div class="col-auto">
+                                        <span class="align-middle">-MAN121</span>
+                                    </div>
+                                </div>
+                                <input type="hidden" id="student_id" name="student_id">
+                                <div class="form-text mt-2">
+                                    <i class="fas fa-info-circle"></i> 
+                                    Format: <strong>CYY-PP-NNNN-MAN121</strong> | 
+                                    You can either enter the program code or select from dropdown below
+                                </div>
+                                <div class="invalid-feedback" id="student_id_error">
+                                    Invalid Student ID. Please fill all fields correctly.
+                                </div>
                             </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="year_level" class="form-label">Year Level</label>
-                                <select class="form-select" id="year_level" name="year_level">
-                                    <option value="">Select Year Level</option>
-                                    <?php for ($i = 1; $i <= 6; $i++): ?>
-                                        <option value="<?php echo $i; ?>">Year <?php echo $i; ?></option>
-                                    <?php endfor; ?>
-                                </select>
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="program" class="form-label">Program</label>
+                                    <select class="form-select" id="program" name="program" onchange="updateProgramCodeFromSelect()">
+                                        <option value="">Select Program (or enter code above)</option>
+                                        <?php foreach($programs as $program): ?>
+                                            <option value="<?php echo htmlspecialchars($program); ?>" 
+                                                    data-code="<?php echo $program_codes[$program] ?? '00'; ?>">
+                                                <?php echo htmlspecialchars($program); ?> (Code: <?php echo $program_codes[$program] ?? '00'; ?>)
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="year_level" class="form-label">Year Level</label>
+                                    <select class="form-select" id="year_level" name="year_level" required>
+                                        <option value="">Select Year Level</option>
+                                        <?php for ($i = 1; $i <= 6; $i++): ?>
+                                            <option value="<?php echo $i; ?>">Year <?php echo $i; ?></option>
+                                        <?php endfor; ?>
+                                    </select>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1100,6 +1371,7 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                 <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                 <input type="hidden" name="action" value="edit_user">
                 <input type="hidden" name="edit_user_id" id="edit_user_id">
+                <input type="hidden" name="edit_user_role" id="edit_user_role">
                 
                 <div class="modal-header bg-warning">
                     <h5 class="modal-title" id="editUserModalLabel">
@@ -1108,6 +1380,10 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Note:</strong> Changing the User ID will update it across all system records.
+                    </div>
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label for="edit_name" class="form-label">Full Name</label>
@@ -1121,18 +1397,63 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
 
                         <!-- Student-only fields for editing -->
                         <div id="editStudentFields" style="display:none;">
-                            <div class="col-md-6 mb-3">
-                                <label for="edit_program" class="form-label">Program</label>
-                                <input type="text" class="form-control" id="edit_program" name="program">
+                            <div class="col-md-12 mb-3">
+                                <label class="form-label">Student ID</label>
+                                <div class="row g-2">
+                                    <div class="col-auto">
+                                        <div class="input-group">
+                                            <span class="input-group-text bg-light"><strong>C</strong></span>
+                                            <input type="text" class="form-control" id="edit_student_year" 
+                                                   placeholder="YY" maxlength="2" size="2" style="width: 70px;">
+                                        </div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <span class="align-middle">-</span>
+                                    </div>
+                                    <div class="col-auto">
+                                        <input type="text" class="form-control" id="edit_student_program_code" 
+                                               placeholder="PP" maxlength="2" size="2" style="width: 70px;">
+                                    </div>
+                                    <div class="col-auto">
+                                        <span class="align-middle">-</span>
+                                    </div>
+                                    <div class="col-auto">
+                                        <input type="text" class="form-control" id="edit_student_number" 
+                                               placeholder="NNNN" maxlength="4" size="4" style="width: 100px;">
+                                    </div>
+                                    <div class="col-auto">
+                                        <span class="align-middle">-MAN121</span>
+                                    </div>
+                                </div>
+                                <input type="hidden" id="edit_student_id" name="student_id">
+                                <div class="form-text mt-2">
+                                    <i class="fas fa-info-circle"></i> 
+                                    Format: <strong>CYY-PP-NNNN-MAN121</strong><br>
+                                    <span class="text-warning">Changing this will update the ID across all system records.</span>
+                                </div>
                             </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="edit_year_level" class="form-label">Year Level</label>
-                                <select class="form-select" id="edit_year_level" name="year_level">
-                                    <option value="">Select Year Level</option>
-                                    <?php for ($i = 1; $i <= 6; $i++): ?>
-                                        <option value="<?php echo $i; ?>">Year <?php echo $i; ?></option>
-                                    <?php endfor; ?>
-                                </select>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="edit_program" class="form-label">Program</label>
+                                    <select class="form-select" id="edit_program" name="program">
+                                        <option value="">Select Program</option>
+                                        <?php foreach($programs as $program): ?>
+                                            <option value="<?php echo htmlspecialchars($program); ?>" 
+                                                    data-code="<?php echo $program_codes[$program] ?? '00'; ?>">
+                                                <?php echo htmlspecialchars($program); ?> (Code: <?php echo $program_codes[$program] ?? '00'; ?>)
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="edit_year_level" class="form-label">Year Level</label>
+                                    <select class="form-select" id="edit_year_level" name="year_level">
+                                        <option value="">Select Year Level</option>
+                                        <?php for ($i = 1; $i <= 6; $i++): ?>
+                                            <option value="<?php echo $i; ?>">Year <?php echo $i; ?></option>
+                                        <?php endfor; ?>
+                                    </select>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1486,7 +1807,348 @@ async function fetchAssessmentData(userId) {
         throw error;
     }
 }
+function updateEditStudentID() {
+    const year = document.getElementById('edit_student_year')?.value || '';
+    const programCode = document.getElementById('edit_student_program_code')?.value || '';
+    const number = document.getElementById('edit_student_number')?.value || '';
+    
+    let fullID = '';
+    if (year || programCode || number) {
+        fullID = `C${year}-${programCode}-${number}-MAN121`;
+    }
+    
+    document.getElementById('edit_student_id').value = fullID;
+}
 
+function updateEditProgramCodeFromSelect() {
+    const programSelect = document.getElementById('edit_program');
+    const selectedOption = programSelect.options[programSelect.selectedIndex];
+    const programCode = selectedOption.getAttribute('data-code');
+    
+    if (programCode && programCode !== '00') {
+        const programCodeInput = document.getElementById('edit_student_program_code');
+        programCodeInput.value = programCode;
+        updateEditStudentID();
+        
+        // Visual feedback
+        programCodeInput.style.borderColor = '#28a745';
+        programCodeInput.style.backgroundColor = '#f0fff4';
+        setTimeout(() => {
+            programCodeInput.style.borderColor = '';
+            programCodeInput.style.backgroundColor = '';
+        }, 500);
+    }
+}
+
+function updateEditProgramCodeFromCode() {
+    const programCode = document.getElementById('edit_student_program_code')?.value || '';
+    const programSelect = document.getElementById('edit_program');
+    
+    if (programCode && programCode !== '00') {
+        // Find and select the matching program
+        for (let i = 0; i < programSelect.options.length; i++) {
+            const option = programSelect.options[i];
+            const optionCode = option.getAttribute('data-code');
+            if (optionCode === programCode) {
+                programSelect.value = option.value;
+                // Visual feedback
+                programSelect.style.borderColor = '#28a745';
+                programSelect.style.backgroundColor = '#f0fff4';
+                setTimeout(() => {
+                    programSelect.style.borderColor = '';
+                    programSelect.style.backgroundColor = '';
+                }, 500);
+                break;
+            }
+        }
+    }
+}
+
+function updateEditStudentIDFromCode() {
+    updateEditStudentID();
+    updateEditProgramCodeFromCode();
+}
+
+// Add input restrictions for edit modal
+document.getElementById('edit_student_year')?.addEventListener('input', function(e) {
+    this.value = this.value.replace(/[^0-9]/g, '').slice(0, 2);
+    updateEditStudentID();
+});
+
+document.getElementById('edit_student_program_code')?.addEventListener('input', function(e) {
+    this.value = this.value.replace(/[^0-9]/g, '').slice(0, 2);
+    updateEditStudentIDFromCode();
+});
+
+document.getElementById('edit_student_number')?.addEventListener('input', function(e) {
+    this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4);
+    updateEditStudentID();
+});
+
+// Program codes mapping for auto-detection
+const programCodeMap = {
+    '01': 'BS Information Technology',
+    '02': 'BS Computer Science',
+    '03': 'BS Business Administration',
+    '04': 'BS Accountancy',
+    '05': 'BS Criminology',
+    '06': 'BS Psychology',
+    '07': 'BS Secondary Education',
+    '08': 'Associate in Computer Technology'
+};
+
+// Reverse mapping for program to code
+const programToCodeMap = {
+    'BS Information Technology': '01',
+    'BS Computer Science': '02',
+    'BS Business Administration': '03',
+    'BS Accountancy': '04',
+    'BS Criminology': '05',
+    'BS Psychology': '06',
+    'BS Secondary Education': '07',
+    'Associate in Computer Technology': '08'
+};
+
+// Update the full student ID from parts
+function updateStudentID() {
+    const year = document.getElementById('student_year')?.value || '';
+    const programCode = document.getElementById('student_program_code')?.value || '';
+    const number = document.getElementById('student_number')?.value || '';
+    
+    let fullID = '';
+    if (year || programCode || number) {
+        fullID = `C${year}-${programCode}-${number}-MAN121`;
+    }
+    
+    document.getElementById('student_id').value = fullID;
+    
+    // Validate the full ID
+    validateStudentIDFormat();
+}
+
+// Update program code from dropdown selection
+function updateProgramCodeFromSelect() {
+    const programSelect = document.getElementById('program');
+    const selectedOption = programSelect.options[programSelect.selectedIndex];
+    const programName = selectedOption.value;
+    const programCode = programToCodeMap[programName];
+    
+    if (programCode) {
+        const programCodeInput = document.getElementById('student_program_code');
+        programCodeInput.value = programCode;
+        updateStudentID();
+        
+        // Visual feedback
+        programCodeInput.style.borderColor = '#28a745';
+        programCodeInput.style.backgroundColor = '#f0fff4';
+        setTimeout(() => {
+            programCodeInput.style.borderColor = '';
+            programCodeInput.style.backgroundColor = '';
+        }, 500);
+    }
+}
+
+// Update program dropdown from code input
+function updateProgramCodeFromCode() {
+    const programCode = document.getElementById('student_program_code')?.value || '';
+    const programSelect = document.getElementById('program');
+    
+    if (programCode && programCodeMap[programCode]) {
+        const programName = programCodeMap[programCode];
+        
+        // Find and select the matching program
+        for (let i = 0; i < programSelect.options.length; i++) {
+            const option = programSelect.options[i];
+            if (option.value === programName) {
+                programSelect.value = option.value;
+                // Visual feedback
+                programSelect.style.borderColor = '#28a745';
+                programSelect.style.backgroundColor = '#f0fff4';
+                setTimeout(() => {
+                    programSelect.style.borderColor = '';
+                    programSelect.style.backgroundColor = '';
+                }, 500);
+                break;
+            }
+        }
+    } else if (programCode && !programCodeMap[programCode]) {
+        // Invalid code - show warning but don't clear
+        const programCodeInput = document.getElementById('student_program_code');
+        programCodeInput.style.borderColor = '#ffc107';
+        programCodeInput.style.backgroundColor = '#fff9e6';
+        setTimeout(() => {
+            programCodeInput.style.borderColor = '';
+            programCodeInput.style.backgroundColor = '';
+        }, 1500);
+    }
+}
+
+// Combined function for program code input
+function updateStudentIDFromCode() {
+    updateStudentID();
+    updateProgramCodeFromCode();
+}
+
+// Validate Student ID format
+function validateStudentIDFormat() {
+    const year = document.getElementById('student_year')?.value || '';
+    const programCode = document.getElementById('student_program_code')?.value || '';
+    const number = document.getElementById('student_number')?.value || '';
+    const studentIdInput = document.getElementById('student_id');
+    
+    let isValid = true;
+    let errorMessage = '';
+    
+    // Validate year (2 digits)
+    if (year && !/^\d{2}$/.test(year)) {
+        isValid = false;
+        errorMessage = 'Year must be 2 digits (e.g., 24)';
+    }
+    
+    // Validate program code (2 digits, 01-08)
+    if (programCode && (!/^\d{2}$/.test(programCode) || parseInt(programCode) < 1 || parseInt(programCode) > 8)) {
+        isValid = false;
+        errorMessage = 'Program code must be 01-08';
+    }
+    
+    // Validate student number (4 digits)
+    if (number && !/^\d{4}$/.test(number)) {
+        isValid = false;
+        errorMessage = 'Student number must be 4 digits (e.g., 0001)';
+    }
+    
+    // Check if all fields are filled
+    if (year && programCode && number) {
+        const fullPattern = /^C[0-9]{2}-[0-9]{2}-[0-9]{4}-MAN121$/;
+        if (!fullPattern.test(`C${year}-${programCode}-${number}-MAN121`)) {
+            isValid = false;
+            errorMessage = 'Invalid format. Use: CYY-PP-NNNN-MAN121';
+        }
+    }
+    
+    if (!isValid && errorMessage) {
+        studentIdInput.classList.add('is-invalid');
+        const errorDiv = document.getElementById('student_id_error');
+        errorDiv.textContent = errorMessage;
+        errorDiv.style.display = 'block';
+        return false;
+    } else {
+        studentIdInput.classList.remove('is-invalid');
+        document.getElementById('student_id_error').style.display = 'none';
+        return true;
+    }
+}
+
+// Validate form submission
+function validateStudentID() {
+    const roleSelect = document.getElementById('role_select');
+    if (roleSelect.value === 'student') {
+        const year = document.getElementById('student_year')?.value || '';
+        const programCode = document.getElementById('student_program_code')?.value || '';
+        const number = document.getElementById('student_number')?.value || '';
+        const studentId = document.getElementById('student_id')?.value || '';
+        const program = document.getElementById('program').value;
+        const yearLevel = document.getElementById('year_level').value;
+        
+        if (!year || !programCode || !number) {
+            alert('Please fill all Student ID fields: Year, Program Code, and Student Number');
+            return false;
+        }
+        
+        if (!/^\d{2}$/.test(year)) {
+            alert('Year must be 2 digits (e.g., 24)');
+            return false;
+        }
+        
+        if (!/^\d{2}$/.test(programCode) || parseInt(programCode) < 1 || parseInt(programCode) > 8) {
+            alert('Program code must be 01-08');
+            return false;
+        }
+        
+        if (!/^\d{4}$/.test(number)) {
+            alert('Student number must be 4 digits (e.g., 0001)');
+            return false;
+        }
+        
+        if (!program) {
+            alert('Please select a program');
+            return false;
+        }
+        
+        if (!yearLevel) {
+            alert('Please select year level');
+            return false;
+        }
+    }
+    return true;
+}
+
+// Toggle student fields
+function toggleStudentFields() {
+    const roleSelect = document.getElementById('role_select');
+    const studentFields = document.getElementById('studentFields');
+
+    if (roleSelect.value === 'student') {
+        studentFields.style.display = 'block';
+        document.getElementById('student_year').required = true;
+        document.getElementById('student_program_code').required = true;
+        document.getElementById('student_number').required = true;
+        document.getElementById('program').required = true;
+        document.getElementById('year_level').required = true;
+        
+        // Set default year
+        const currentYear = new Date().getFullYear().toString().slice(-2);
+        if (!document.getElementById('student_year').value) {
+            document.getElementById('student_year').value = currentYear;
+            updateStudentID();
+        }
+    } else {
+        studentFields.style.display = 'none';
+        document.getElementById('student_year').required = false;
+        document.getElementById('student_program_code').required = false;
+        document.getElementById('student_number').required = false;
+        document.getElementById('program').required = false;
+        document.getElementById('year_level').required = false;
+    }
+}
+
+// Input restrictions - allow only numbers
+document.getElementById('student_year')?.addEventListener('input', function(e) {
+    this.value = this.value.replace(/[^0-9]/g, '').slice(0, 2);
+    updateStudentID();
+});
+
+document.getElementById('student_program_code')?.addEventListener('input', function(e) {
+    this.value = this.value.replace(/[^0-9]/g, '').slice(0, 2);
+    updateStudentIDFromCode();
+});
+
+document.getElementById('student_number')?.addEventListener('input', function(e) {
+    this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4);
+    updateStudentID();
+});
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Set default year
+    const currentYear = new Date().getFullYear().toString().slice(-2);
+    const yearInput = document.getElementById('student_year');
+    if (yearInput && !yearInput.value) {
+        yearInput.value = currentYear;
+    }
+});     
+function clearFilters() {
+    // Log via AJAX
+    fetch('ajax_handler.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'action=log_activity&action_type=Filters Cleared&description=User cleared all filters on manage users page'
+    }).catch(console.error);
+    
+    window.location.href = window.location.pathname + '?manage_users.php';
+}
 // View Assessment - Main function
 function viewAssessment(userId, userName) {
     // Reset modal content
@@ -1710,8 +2372,10 @@ function viewUserDetails(userId) {
             document.getElementById('modalUserName').textContent = 'Error';
         });
 }
-// Generate HTML for user details modal
 function generateUserDetailsHTML(user, additionalInfo) {
+    // Handle null/undefined values
+    user = user || {};
+    additionalInfo = additionalInfo || {};
     // Helper function to get initials
     function getInitials(name) {
         let initials = '';
@@ -2160,6 +2824,7 @@ function toggleStudentFields() {
 function openEditModal(userId, name, email, role, program, yearLevel) {
     // Populate edit form fields
     document.getElementById('edit_user_id').value = userId;
+    document.getElementById('edit_user_role').value = role;
     document.getElementById('edit_name').value = name;
     document.getElementById('edit_email').value = email;
     
@@ -2169,6 +2834,78 @@ function openEditModal(userId, name, email, role, program, yearLevel) {
         editStudentFields.style.display = 'block';
         document.getElementById('edit_program').value = program || '';
         document.getElementById('edit_year_level').value = yearLevel || '';
+        
+        // Parse the student ID and populate the parts
+        const idPattern = /^C?([0-9]{2})-([0-9]{2})-([0-9]{4})-MAN121$/i;
+        const match = userId.match(idPattern);
+        
+        if (match) {
+            const year = match[1];
+            const programCode = match[2];
+            const studentNumber = match[3];
+            
+            document.getElementById('edit_student_year').value = year;
+            document.getElementById('edit_student_program_code').value = programCode;
+            document.getElementById('edit_student_number').value = studentNumber;
+            
+            // Build the full ID with uppercase C
+            const fullID = `C${year}-${programCode}-${studentNumber}-MAN121`;
+            document.getElementById('edit_student_id').value = fullID;
+            
+            // Also select the program based on code
+            const programSelect = document.getElementById('edit_program');
+            for (let i = 0; i < programSelect.options.length; i++) {
+                const option = programSelect.options[i];
+                const optionCode = option.getAttribute('data-code');
+                if (optionCode === programCode) {
+                    programSelect.value = option.value;
+                    break;
+                }
+            }
+        } else {
+            document.getElementById('edit_student_year').value = '';
+            document.getElementById('edit_student_program_code').value = '';
+            document.getElementById('edit_student_number').value = '';
+            document.getElementById('edit_student_id').value = userId;
+        }
+        
+        // Add event listeners to update the hidden ID when fields change
+        const updateHiddenID = function() {
+            const year = document.getElementById('edit_student_year').value;
+            const programCode = document.getElementById('edit_student_program_code').value;
+            const number = document.getElementById('edit_student_number').value;
+            if (year && programCode && number) {
+                document.getElementById('edit_student_id').value = `C${year}-${programCode}-${number}-MAN121`;
+            }
+        };
+        
+        document.getElementById('edit_student_year').oninput = updateHiddenID;
+        document.getElementById('edit_student_program_code').oninput = updateHiddenID;
+        document.getElementById('edit_student_number').oninput = updateHiddenID;
+        
+        // Also update program when code changes
+        document.getElementById('edit_student_program_code').onchange = function() {
+            const code = this.value;
+            const programSelect = document.getElementById('edit_program');
+            for (let i = 0; i < programSelect.options.length; i++) {
+                const option = programSelect.options[i];
+                if (option.getAttribute('data-code') === code) {
+                    programSelect.value = option.value;
+                    break;
+                }
+            }
+        };
+        
+        // Update code when program changes
+        document.getElementById('edit_program').onchange = function() {
+            const selectedOption = this.options[this.selectedIndex];
+            const code = selectedOption.getAttribute('data-code');
+            if (code) {
+                document.getElementById('edit_student_program_code').value = code;
+                updateHiddenID();
+            }
+        };
+        
     } else {
         editStudentFields.style.display = 'none';
     }

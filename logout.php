@@ -12,5 +12,5 @@ if (checkSession()) {
 }
 
 // Redirect to login page
-redirect('/student\'s-information-system/login.php');
+redirect('/students_information_system/login.php');
 ?>
