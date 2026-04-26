@@ -66,6 +66,8 @@ $stmt->execute([$search_term]);
 $activity_log = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 renderPageStart('Payment Details - ' . $payment['permit_number'], $user_role, 'manage_payments.php');
+
+
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -144,7 +146,7 @@ renderPageStart('Payment Details - ' . $payment['permit_number'], $user_role, 'm
                     </tr>
                     <?php endif; ?>
                 </table>
-            </div>
+            </div>  
         </div>
     </div>
 

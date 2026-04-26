@@ -887,6 +887,12 @@ renderPageStart('Manage Courses', 'admin', 'manage_courses.php');
                                             data-year="<?php echo $section['year_level']; ?>">
                                         <i class="fas fa-user-plus"></i> Students
                                     </button>
+                                    <button class="btn btn-sm btn-outline-info schedule-section-btn" 
+                                            data-id="<?php echo $section['id']; ?>"
+                                            data-code="<?php echo htmlspecialchars($section['section_code']); ?>"
+                                            title="Manage Schedule">
+                                        <i class="fas fa-calendar-alt"></i>
+                                    </button>
                                     <button class="btn btn-outline-info view-section-details-btn" data-id="<?php echo $section['id']; ?>">
                                         <i class="fas fa-info-circle"></i>
                                     </button>
@@ -1640,6 +1646,78 @@ renderPageStart('Manage Courses', 'admin', 'manage_courses.php');
     </div>
 </div>
 
+<!-- Manage Section Schedule Modal -->
+<div class="modal fade" id="manageScheduleModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="fas fa-calendar-alt me-2"></i>Manage Section Schedule</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="schedule_section_id">
+                <div class="alert alert-info" id="schedule_section_info"></div>
+                
+                <!-- Current Schedules -->
+                <h6>Current Schedules</h6>
+                <div id="scheduleList" class="mb-4">
+                    <div class="text-center py-3">Loading schedules...</div>
+                </div>
+                
+                <!-- Add New Schedule -->
+                <hr>
+                <h6>Add New Schedule</h6>
+                <div class="alert alert-warning" id="scheduleWarning" style="display: none;">
+                    <i class="fas fa-exclamation-triangle"></i> 
+                    <span id="scheduleWarningText"></span>
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-4">
+                        <label class="form-label">Subject <span class="text-danger">*</span></label>
+                        <select id="schedule_subject_id" class="form-select" required onchange="checkSubjectScheduleStatus()">
+                            <option value="">-- Select Subject --</option>
+                        </select>
+                        <div class="form-text" id="subjectScheduleStatus"></div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Day <span class="text-danger">*</span></label>
+                        <select id="schedule_day" class="form-select" required>
+                            <option value="">-- Day --</option>
+                            <option value="Monday">Monday</option>
+                            <option value="Tuesday">Tuesday</option>
+                            <option value="Wednesday">Wednesday</option>
+                            <option value="Thursday">Thursday</option>
+                            <option value="Friday">Friday</option>
+                            <option value="Saturday">Saturday</option>
+                            <option value="Sunday">Sunday</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Start Time <span class="text-danger">*</span></label>
+                        <input type="time" id="schedule_start" class="form-control" step="60">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">End Time <span class="text-danger">*</span></label>
+                        <input type="time" id="schedule_end" class="form-control" step="60">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Room</label>
+                        <input type="text" id="schedule_room" class="form-control" placeholder="e.g., Room 101">
+                    </div>
+                    <div class="col-md-12 mt-2">
+                        <button class="btn btn-success" onclick="addSchedule()">
+                            <i class="fas fa-plus"></i> Add Schedule
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- View Subject Details Modal -->
 <div class="modal fade" id="viewSubjectDetailsModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -1859,7 +1937,7 @@ function viewSectionDetails(sectionId) {
         .catch(error => console.error('Error loading section details:', error));
 }
 // ====================================================
-// SECTION SUBJECT MANAGEMENT (FULLY WORKING)
+// SECTION SUBJECT MANAGEMENT 
 // ====================================================
 
 function manageSectionSubjects(sectionId, sectionCode) {
@@ -2232,7 +2310,7 @@ function showToast(message, type = 'success') {
     showMessage(message);
 }
 // ====================================================
-// STUDENT ASSIGNMENT (WITH STICKY BUTTON & CONFIRMATION)
+// STUDENT ASSIGNMENT
 // ====================================================
 
 function openAssignStudentsModal(sectionId, sectionCode, sectionName, program, yearLevel) {
@@ -2465,6 +2543,205 @@ function loadStudentsForAssignment() {
         })
         .catch(error => console.error('Error loading students:', error));
 }
+
+let currentSectionSubjects = [];
+
+function manageSectionSchedule(sectionId, sectionCode) {
+    document.getElementById('schedule_section_id').value = sectionId;
+    document.getElementById('schedule_section_info').innerHTML = `<strong>Section:</strong> ${sectionCode}`;
+    
+    loadSchedules(sectionId);
+    const modal = new bootstrap.Modal(document.getElementById('manageScheduleModal'));
+    modal.show();
+}
+
+function loadSchedules(sectionId) {
+    fetch(`ajax_handler.php?action=get_section_schedules&section_id=${sectionId}`)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('scheduleList');
+            const subjectSelect = document.getElementById('schedule_subject_id');
+            
+            if (data.success) {
+                // Store available subjects for later use
+                currentSectionSubjects = data.available_subjects || [];
+                
+                // Populate subject dropdown (only show subjects without schedule)
+                subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
+                let hasUnscheduledSubjects = false;
+                data.available_subjects.forEach(subject => {
+                    if (subject.has_schedule == 0) {
+                        subjectSelect.innerHTML += `<option value="${subject.id}" data-units="${subject.units}">${subject.subject_code} - ${subject.subject_name} (${subject.units} units)</option>`;
+                        hasUnscheduledSubjects = true;
+                    }
+                });
+                
+                if (!hasUnscheduledSubjects) {
+                    subjectSelect.innerHTML = '<option value="">-- All subjects have schedules --</option>';
+                    document.getElementById('scheduleWarning').style.display = 'block';
+                    document.getElementById('scheduleWarningText').innerHTML = 'All subjects assigned to this section already have schedules.';
+                } else {
+                    document.getElementById('scheduleWarning').style.display = 'none';
+                }
+                
+                // Display current schedules
+                if (data.schedules && data.schedules.length > 0) {
+                    let html = '<table class="table table-sm table-striped"><thead><tr><th>Subject</th><th>Day</th><th>Time</th><th>Room</th><th>Action</th></tr></thead><tbody>';
+                    data.schedules.forEach(sched => {
+                        html += `<tr id="schedule-row-${sched.id}">
+                                    <td><strong>${sched.subject_code}</strong><br><small class="text-muted">${sched.subject_name}</small></td>
+                                    <td>${sched.day_of_week}</td>
+                                    <td>${sched.start_time.substring(0,5)} - ${sched.end_time.substring(0,5)}</span></td>
+                                    <td>${sched.room || 'TBA'}</span></td>
+                                    <td><button class="btn btn-sm btn-danger" onclick="deleteSchedule(${sched.id})"><i class="fas fa-trash"></i> Remove</button></td>
+                                </tr>`;
+                    });
+                    html += '</tbody></table>';
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = '<div class="alert alert-info">No schedules set for this section.</div>';
+                }
+            } else {
+                container.innerHTML = '<div class="alert alert-danger">Error loading schedules.</div>';
+                subjectSelect.innerHTML = '<option value="">-- Error loading subjects --</option>';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            document.getElementById('scheduleList').innerHTML = '<div class="alert alert-danger">Error loading schedules.</div>';
+        });
+}
+
+function checkSubjectScheduleStatus() {
+    const subjectId = document.getElementById('schedule_subject_id').value;
+    const statusDiv = document.getElementById('subjectScheduleStatus');
+    
+    if (subjectId) {
+        const subject = currentSectionSubjects.find(s => s.id == subjectId);
+        if (subject && subject.has_schedule == 1) {
+            statusDiv.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle"></i> This subject already has a schedule. Adding a new schedule will replace the existing one.</span>';
+        } else {
+            statusDiv.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> This subject does not have a schedule yet.</span>';
+        }
+    } else {
+        statusDiv.innerHTML = '';
+    }
+}
+
+function addSchedule() {
+    const sectionId = document.getElementById('schedule_section_id').value;
+    const subjectId = document.getElementById('schedule_subject_id').value;
+    const day = document.getElementById('schedule_day').value;
+    const startTime = document.getElementById('schedule_start').value;
+    const endTime = document.getElementById('schedule_end').value;
+    const room = document.getElementById('schedule_room').value;
+    
+    if (!subjectId) {
+        alert('Please select a subject.');
+        return;
+    }
+    if (!day) {
+        alert('Please select a day.');
+        return;
+    }
+    if (!startTime) {
+        alert('Please enter start time.');
+        return;
+    }
+    if (!endTime) {
+        alert('Please enter end time.');
+        return;
+    }
+    if (startTime >= endTime) {
+        alert('End time must be after start time.');
+        return;
+    }
+    
+    // Check if subject already has schedule (update instead of insert)
+    const subject = currentSectionSubjects.find(s => s.id == subjectId);
+    let isUpdate = subject && subject.has_schedule == 1;
+    
+    let confirmMsg = isUpdate 
+        ? `This subject already has a schedule. Do you want to REPLACE it with the new schedule?`
+        : `Add schedule for this subject?`;
+    
+    if (!confirm(confirmMsg)) return;
+    
+    const formData = new FormData();
+    formData.append('action', 'add_schedule');
+    formData.append('section_id', sectionId);
+    formData.append('subject_id', subjectId);
+    formData.append('day_of_week', day);
+    formData.append('start_time', startTime);
+    formData.append('end_time', endTime);
+    formData.append('room', room);
+    formData.append('csrf_token', '<?php echo generateCSRFToken(); ?>');
+    
+    const btn = event.target;
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
+    
+    fetch('ajax_handler.php', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(isUpdate ? 'Schedule updated successfully!' : 'Schedule added successfully!');
+                loadSchedules(sectionId);
+                document.getElementById('schedule_subject_id').value = '';
+                document.getElementById('schedule_day').value = '';
+                document.getElementById('schedule_start').value = '';
+                document.getElementById('schedule_end').value = '';
+                document.getElementById('schedule_room').value = '';
+                document.getElementById('subjectScheduleStatus').innerHTML = '';
+            } else {
+                alert('Error: ' + data.message);
+            }
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Network error. Please try again.');
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        });
+}
+
+function deleteSchedule(scheduleId) {
+    if (!confirm('Remove this schedule? This action cannot be undone.')) return;
+    
+    const formData = new FormData();
+    formData.append('action', 'delete_schedule');
+    formData.append('schedule_id', scheduleId);
+    formData.append('csrf_token', '<?php echo generateCSRFToken(); ?>');
+    
+    fetch('ajax_handler.php', { method: 'POST', body: formData })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const row = document.getElementById(`schedule-row-${scheduleId}`);
+                if (row) row.remove();
+                alert('Schedule removed successfully.');
+                // Reload to refresh subject dropdown
+                const sectionId = document.getElementById('schedule_section_id').value;
+                loadSchedules(sectionId);
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Network error. Please try again.');
+        });
+}
+
+document.addEventListener('click', function(e) {
+    if (e.target.closest('.schedule-section-btn')) {
+        const btn = e.target.closest('.schedule-section-btn');
+        manageSectionSchedule(btn.dataset.id, btn.dataset.code);
+    }
+});
 
 function renderStudentTable(students) {
     const tbody = document.getElementById('studentTableBody');

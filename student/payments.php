@@ -75,6 +75,9 @@ try {
                            {$where_clause}");
     $stmt->execute($params);
     $summary_result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    $summary['unpaid_amount'] = max(0, $summary['unpaid_amount'] ?? 0);
+    $summary['partial_balance'] = max(0, $summary['partial_balance'] ?? 0);
     
     if ($summary_result) {
         $summary = array_merge($summary, $summary_result);

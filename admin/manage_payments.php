@@ -9,6 +9,11 @@ $pdo = getDBConnection();
 $error = '';
 $success = '';
 
+// Add this code to get the global unit price
+$stmt = $pdo->query("SELECT value FROM settings WHERE name = 'unit_price'");
+$global_unit_price_result = $stmt->fetch(PDO::FETCH_ASSOC);
+$global_unit_price = $global_unit_price_result ? floatval($global_unit_price_result['value']) : 2400.00;
+
 // Handle payment actions
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (!validateCSRFToken($_POST['csrf_token'] ?? '')) {
@@ -394,7 +399,7 @@ $date_to = $_GET['date_to'] ?? '';
 $search = $_GET['search'] ?? '';
 $payment_type_filter = $_GET['payment_type'] ?? '';
 
-// Build query
+// Build WHERE conditions
 $where_conditions = [];
 $params = [];
 
@@ -444,33 +449,52 @@ if (!empty($search)) {
 
 $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
 
-// Get payments with student and issuer information
-$query = "SELECT p.*, si.name as student_name, si.program, si.year_level,
-                 u.name as issued_by_name, u.role as issued_by_role
-          FROM payments p
-          JOIN students_info si ON p.student_id = si.user_id
-          JOIN users u ON p.issued_by = u.user_id
-          {$where_clause}
-          ORDER BY p.issued_date DESC, p.id DESC
-          LIMIT 200";
+// Pagination
+$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$per_page = 25;
+$offset = ($page - 1) * $per_page;
 
-$stmt = $pdo->prepare($query);
+// Count total
+$count_sql = "SELECT COUNT(*) as total
+              FROM payments p
+              JOIN students_info si ON p.student_id = si.user_id
+              JOIN users u ON p.issued_by = u.user_id
+              {$where_clause}";
+$stmt = $pdo->prepare($count_sql);
+$stmt->execute($params);
+$total_records = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$total_pages = ceil($total_records / $per_page);
+
+// Get paginated results
+$sql = "SELECT p.*, si.name as student_name, si.program, si.year_level,
+               u.name as issued_by_name, u.role as issued_by_role
+        FROM payments p
+        JOIN students_info si ON p.student_id = si.user_id
+        JOIN users u ON p.issued_by = u.user_id
+        {$where_clause}
+        ORDER BY p.issued_date DESC, p.id DESC
+        LIMIT " . intval($per_page) . " OFFSET " . intval($offset);
+
+$stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get summary statistics
-$stmt = $pdo->prepare("SELECT 
-                        COUNT(*) as total_count,
-                        SUM(amount) as total_amount,
-                        SUM(CASE WHEN payment_status = 'paid' THEN amount ELSE 0 END) as paid_amount,
-                        SUM(CASE WHEN payment_status = 'unpaid' THEN amount ELSE 0 END) as unpaid_amount,
-                        SUM(CASE WHEN payment_status = 'partial' THEN remaining_balance ELSE 0 END) as partial_balance
-                       FROM payments p
-                       JOIN students_info si ON p.student_id = si.user_id
-                       JOIN users u ON p.issued_by = u.user_id
-                       {$where_clause}");
+// Get summary statistics (using same WHERE clause)
+$summary_sql = "SELECT 
+                COUNT(*) as total_count,
+                SUM(amount) as total_amount,
+                SUM(CASE WHEN payment_status = 'paid' THEN amount ELSE 0 END) as paid_amount,
+                SUM(CASE WHEN payment_status = 'unpaid' THEN amount ELSE 0 END) as unpaid_amount,
+                SUM(CASE WHEN payment_status = 'partial' THEN remaining_balance ELSE 0 END) as partial_balance
+               FROM payments p
+               JOIN students_info si ON p.student_id = si.user_id
+               {$where_clause}";
+$stmt = $pdo->prepare($summary_sql);
 $stmt->execute($params);
 $summary = $stmt->fetch(PDO::FETCH_ASSOC);
+
+$summary['remaining_balance'] = max(0, $summary['remaining_balance'] ?? 0);
+$summary['outstanding'] = max(0, ($summary['unpaid_amount'] ?? 0) + ($summary['partial_balance'] ?? 0));
 
 // Get students for dropdown
 $stmt = $pdo->query("SELECT user_id, name FROM students_info ORDER BY name");
@@ -490,6 +514,36 @@ $payment_categories = $stmt->fetchAll(PDO::FETCH_ASSOC);
 // Get active students count for bulk payments
 $stmt = $pdo->query("SELECT COUNT(*) as active_count FROM students_info WHERE status = 'active'");
 $active_count = $stmt->fetch(PDO::FETCH_ASSOC)['active_count'];
+
+// Pagination settings
+$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$per_page = 25;
+$offset = ($page - 1) * $per_page;
+
+// Count total records (using positional parameters only)
+$count_sql = "SELECT COUNT(*) as total
+              FROM payments p
+              JOIN students_info si ON p.student_id = si.user_id
+              JOIN users u ON p.issued_by = u.user_id
+              {$where_clause}";
+$stmt = $pdo->prepare($count_sql);
+$stmt->execute($params);
+$total_records = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$total_pages = ceil($total_records / $per_page);
+
+// Get paginated results - use ONLY positional parameters (no named parameters)
+$sql = "SELECT p.*, si.name as student_name, si.program, si.year_level,
+               u.name as issued_by_name, u.role as issued_by_role
+        FROM payments p
+        JOIN students_info si ON p.student_id = si.user_id
+        JOIN users u ON p.issued_by = u.user_id
+        {$where_clause}
+        ORDER BY p.issued_date DESC, p.id DESC
+        LIMIT " . intval($per_page) . " OFFSET " . intval($offset);
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 renderPageStart('Manage Payments', 'admin', 'manage_payments.php');
 ?>
@@ -608,21 +662,44 @@ renderPageStart('Manage Payments', 'admin', 'manage_payments.php');
 
             <!-- Units Section for Exam Fees -->
             <div class="row mb-3" id="units_section" style="display: none;">
-                <div class="col-md-6">
+                <div class="col-md-4 mb-3">
+                    <label for="exam_type" class="form-label">Exam Type</label>
+                    <select class="form-select" id="exam_type" name="exam_type" onchange="updateExamDescription()">
+                        <option value="prelim">Prelim Examination</option>
+                        <option value="midterm">Midterm Examination</option>
+                        <option value="prefinals">Prefinals Examination</option>
+                        <option value="finals">Final Examination</option>
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label for="exam_subject" class="form-label">Subject</label>
+                    <select class="form-select" id="exam_subject" name="exam_subject" onchange="updateExamDescription()">
+                        <option value="">-- Select Subject --</option>
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label for="units" class="form-label">Units for this Subject</label>
+                    <input type="number" class="form-control" id="units" name="units" min="0" max="10" value="0" readonly>
+                </div>
+                <div class="col-md-3 mb-3">
                     <label for="units" class="form-label">Number of Units</label>
                     <div class="input-group">
-                        <input type="number" class="form-control" id="units" name="units" 
-                               min="0" max="50" value="0">
-                        <button type="button" class="btn btn-outline-primary" onclick="calculateExamFee()">
-                            <i class="fas fa-calculator"></i> Calculate
+                        <input type="number" class="form-control" id="units" name="units" min="0" max="50" value="0" readonly>
+                        <button type="button" class="btn btn-outline-secondary" onclick="recalcStudentUnits(document.getElementById('student_id').value)">
+                            <i class="fas fa-sync-alt"></i>
                         </button>
                     </div>
-                    <div class="form-text">Exam fee: ₱2,400 per unit</div>
+                    <div class="form-text">Total enrolled units from student's study load</div>
                 </div>
-                <div class="col-md-6">
-                    <div class="alert alert-info mt-4">
-                        <small><i class="fas fa-info-circle"></i> Exam fee will be automatically calculated based on units</small>
-                    </div>
+                <div class="col-md-3 mb-3">
+                    <label for="unit_price_display" class="form-label">Unit Price</label>
+                    <input type="text" class="form-control" id="unit_price_display" value="₱<?php echo number_format($global_unit_price, 2); ?>" readonly>
+                    <div class="form-text">Per unit price (from settings)</div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label for="exam_amount" class="form-label">Exam Fee Amount</label>
+                    <input type="number" class="form-control" id="exam_amount" name="exam_amount" readonly>
+                    <div class="form-text">Automatically calculated</div>
                 </div>
             </div>
 
@@ -971,6 +1048,7 @@ renderPageStart('Manage Payments', 'admin', 'manage_payments.php');
 <div class="card mb-4">
     <div class="card-body">
         <form method="GET" class="row g-3">
+            <input type="hidden" name="page" value="1">
             <div class="col-md-2">
                 <label for="status" class="form-label">Status</label>
                 <select class="form-select" id="status" name="status">
@@ -1163,13 +1241,18 @@ renderPageStart('Manage Payments', 'admin', 'manage_payments.php');
                                     </a>
                                     
                                     <!-- Record Payment (for unpaid/partial payments) -->
-                                    <?php if (in_array($payment['payment_status'], ['unpaid', 'partial'])): ?>
-                                    <button class="btn btn-sm btn-success" 
-                                            onclick="recordPayment('<?php echo $payment['id']; ?>', '<?php echo htmlspecialchars($payment['permit_number'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($payment['student_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($payment['description'], ENT_QUOTES); ?>', '<?php echo $payment['amount']; ?>', '<?php echo $payment['remaining_balance']; ?>', '<?php echo $payment['payment_status']; ?>')"
-                                            title="Record Payment">
+                                    <button class="btn btn-sm btn-success record-payment-btn" 
+                                            data-id="<?php echo $payment['id']; ?>"
+                                            data-permit="<?php echo htmlspecialchars($payment['permit_number']); ?>"
+                                            data-student="<?php echo htmlspecialchars($payment['student_name']); ?>"
+                                            data-description="<?php echo htmlspecialchars($payment['description']); ?>"
+                                            data-amount="<?php echo $payment['amount']; ?>"
+                                            data-balance="<?php echo $payment['remaining_balance']; ?>"
+                                            data-status="<?php echo $payment['payment_status']; ?>"
+                                            title="Record Payment"
+                                            <?php echo $payment['payment_status'] === 'paid' ? 'disabled style="opacity:0.6;"' : ''; ?>>
                                         <i class="fas fa-money-bill-wave"></i>
                                     </button>
-                                    <?php endif; ?>
 
                                     <!-- Update Payment Info -->
                                     <button class="btn btn-sm btn-warning" 
@@ -1190,6 +1273,22 @@ renderPageStart('Manage Payments', 'admin', 'manage_payments.php');
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+                <?php if (!empty($payments)): ?>
+                    <div class="table-responsive"> ... </div>
+                    <div class="d-flex justify-content-between align-items-center mt-3">
+                        <div>
+                            Showing <?php echo $offset + 1; ?> to <?php echo min($offset + $per_page, $total_records); ?> of <?php echo $total_records; ?> payments
+                        </div>
+                        <div>
+                            <?php 
+                            // Preserve current filter parameters
+                            $query_params = $_GET;
+                            unset($query_params['page']);
+                            echo renderPagination($page, $total_pages, 'manage_payments.php', $query_params);
+                            ?>
+                        </div>
+                    </div>
+                <?php endif; ?>
             </div>
         <?php endif; ?>
     </div>
@@ -1318,8 +1417,120 @@ document.addEventListener('click', function(event) {
     }
 });
 
-// Load student information via AJAX        
-function loadStudentInfo(studentId) {    
+
+function recalcStudentUnits(studentId) {
+    if (!studentId) {
+        alert('Please select a student first.');
+        return;
+    }
+    
+    fetch(`ajax_handler.php?action=get_student_total_units&student_id=${encodeURIComponent(studentId)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('units').value = data.total_units;
+                calculateExamFee();
+                showToast(`Units recalculated: ${data.total_units} units`, 'success');
+            } else {
+                showToast('Error: ' + data.message, 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showToast('Failed to recalculate units', 'danger');
+        });
+}
+
+function calculateExamFee() {
+    const units = parseInt(document.getElementById('units').value) || 0;
+    const unitPrice =<?php echo $global_unit_price; ?>;
+    const totalAmount = units * unitPrice;
+    
+    if (units > 0) {
+        document.getElementById('exam_amount').value = totalAmount;
+        document.getElementById('amount').value = totalAmount;
+        document.getElementById('amount_paid').value = totalAmount;
+        calculateRemainingBalance();
+        updateExamDescription();
+    } else {
+        document.getElementById('exam_amount').value = 0;
+        document.getElementById('amount').value = '';
+    }
+}
+
+
+function handlePaymentTypeChange() {
+    const paymentType = document.getElementById('payment_type').value;
+    const unitsSection = document.getElementById('units_section');
+    const examTypeSelect = document.getElementById('exam_type');
+    
+    if (paymentType === 'exam') {
+        unitsSection.style.display = 'flex';
+        // Auto-fetch student units if student is selected
+        const studentId = document.getElementById('student_id').value;
+        if (studentId) {
+            recalcStudentUnits(studentId);
+        }
+    } else {
+        unitsSection.style.display = 'none';
+        document.getElementById('units').value = '0';
+        if (paymentType === 'tuition') {
+            document.getElementById('description').value = 'Tuition Fee';
+        } else if (paymentType === 'misc') {
+            document.getElementById('description').value = 'Miscellaneous Fee';
+        } else {
+            document.getElementById('description').value = '';
+        }
+    }
+}
+
+function loadStudentSubjects(studentId) {
+    fetch(`ajax_handler.php?action=get_student_subjects&student_id=${encodeURIComponent(studentId)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const subjectSelect = document.getElementById('exam_subject');
+                subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
+                data.subjects.forEach(subject => {
+                    subjectSelect.innerHTML += `<option value="${subject.id}" data-units="${subject.units}">${subject.subject_code} - ${subject.subject_name} (${subject.units} units)</option>`;
+                });
+            }
+        });
+}
+
+function updateExamDescription() {
+    const examType = document.getElementById('exam_type').value;
+    const subjectSelect = document.getElementById('exam_subject');
+    const selectedOption = subjectSelect.options[subjectSelect.selectedIndex];
+    const subjectCode = selectedOption.value ? selectedOption.text.split(' - ')[0] : '';
+    const subjectName = selectedOption.value ? selectedOption.text.split(' - ')[1]?.split(' (')[0] : '';
+    const units = selectedOption.dataset.units || 0;
+    
+    document.getElementById('units').value = units;
+    
+    let examTypeName = '';
+    switch(examType) {
+        case 'prelim': examTypeName = 'Prelim'; break;
+        case 'midterm': examTypeName = 'Midterm'; break;
+        case 'prefinals': examTypeName = 'Prefinals'; break;
+        case 'finals': examTypeName = 'Final'; break;
+    }
+    
+    const unitPrice = <?php echo $global_unit_price; ?>;
+    const amount = units * unitPrice;
+    document.getElementById('exam_amount').value = amount;
+    document.getElementById('amount').value = amount;
+    document.getElementById('amount_paid').value = amount;
+    
+    let description = `${examTypeName} Examination Fee`;
+    if (subjectCode) {
+        description += ` - ${subjectCode} ${subjectName} (${units} units)`;
+    }
+    document.getElementById('description').value = description;
+    calculateRemainingBalance();
+}
+
+function loadStudentInfo(studentId) {
     // Show loading state
     document.getElementById('student_info_section').style.display = 'block';
     document.getElementById('info_program').textContent = 'Loading...';
@@ -1345,6 +1556,11 @@ function loadStudentInfo(studentId) {
                 
                 // Auto-fill units for exam calculation
                 document.getElementById('units').value = student.total_units || 0;
+                
+                // If exam payment type is selected, calculate fee
+                if (document.getElementById('payment_type').value === 'exam') {
+                    calculateExamFee();
+                }
             } else {
                 document.getElementById('student_info_section').style.display = 'none';
                 console.error('Failed to load student info:', data.message);
@@ -1357,30 +1573,6 @@ function loadStudentInfo(studentId) {
             alert('Failed to load student information. Please try again.');
         });
 }
-
-// Payment type handling
-function handlePaymentTypeChange() {
-    const paymentType = document.getElementById('payment_type').value;
-    const unitsSection = document.getElementById('units_section');
-    
-    if (paymentType === 'exam') {
-        unitsSection.style.display = 'block';
-        // Auto-fill description
-        document.getElementById('description').value = 'Examination Fee';
-    } else {
-        unitsSection.style.display = 'none';
-        // Clear units-related fields
-        document.getElementById('units').value = '0';
-        if (paymentType === 'tuition') {
-            document.getElementById('description').value = 'Tuition Fee';
-        } else if (paymentType === 'misc') {
-            document.getElementById('description').value = 'Miscellaneous Fee';
-        } else {
-            document.getElementById('description').value = '';
-        }
-    }
-}
-
 // Bulk payment type handling
 function handleBulkPaymentTypeChange() {
     const bulkPaymentType = document.getElementById('bulk_payment_type').value;
@@ -1399,26 +1591,6 @@ function handleBulkPaymentTypeChange() {
     }
 }
 
-// Calculate exam fee (₱2,400 per unit)
-function calculateExamFee() {
-    const units = parseInt(document.getElementById('units').value) || 0;
-    const examFeePerUnit = 2400;
-    const totalAmount = units * examFeePerUnit;
-    
-    if (units > 0) {
-        document.getElementById('amount').value = totalAmount;
-        document.getElementById('amount_paid').value = totalAmount;
-        calculateRemainingBalance();
-        
-        // Auto-fill description with unit count
-        document.getElementById('description').value = `Examination Fee - ${units} units`;
-    } else {
-        alert('Please enter a valid number of units.');
-        document.getElementById('amount').value = '';
-        document.getElementById('amount_paid').value = '0';
-        calculateRemainingBalance();
-    }
-}
 
 // Calculate remaining balance in real-time
 function calculateRemainingBalance() {

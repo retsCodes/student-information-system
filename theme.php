@@ -17,6 +17,7 @@ function getCurrentTheme() {
     return $_SESSION['theme'] ?? 'light';
 }
 
+
 // Theme toggle button HTML
 function getThemeToggleButton() {
     $currentTheme = getCurrentTheme();
@@ -145,5 +146,79 @@ function getThemeCSS() {
         </style>';
     }
     return '';
+    
+}
+/**
+ * Helper to build URL with preserved query parameters for pagination
+ */
+function buildPaginationUrl($base_url, $page, $params) {
+    $params['page'] = $page;
+    return $base_url . '?' . http_build_query($params);
+}
+
+/**
+ * Generate pagination HTML with Bootstrap styling
+ * 
+ * @param int $current_page Current page number (1-indexed)
+ * @param int $total_pages Total number of pages
+ * @param string $base_url Base URL (without page parameter)
+ * @param array $params Additional query parameters to preserve
+ * @return string HTML pagination
+ */
+function renderPagination($current_page, $total_pages, $base_url, $params = []) {
+    if ($total_pages <= 1) {
+        return '';
+    }
+    
+    $html = '<nav aria-label="Page navigation"><ul class="pagination justify-content-center">';
+    
+    // Previous button
+    $disabled_prev = ($current_page <= 1) ? 'disabled' : '';
+    $prev_url = ($current_page > 1) ? buildPaginationUrl($base_url, $current_page - 1, $params) : '#';
+    $html .= sprintf(
+        '<li class="page-item %s"><a class="page-link" href="%s">&laquo; Previous</a></li>',
+        $disabled_prev,
+        $prev_url
+    );
+    
+    // Page numbers (show up to 5 pages)
+    $start = max(1, $current_page - 2);
+    $end = min($total_pages, $current_page + 2);
+    
+    if ($start > 1) {
+        $html .= sprintf('<li class="page-item"><a class="page-link" href="%s">1</a></li>', buildPaginationUrl($base_url, 1, $params));
+        if ($start > 2) {
+            $html .= '<li class="page-item disabled"><span class="page-link">...</span></li>';
+        }
+    }
+    
+    for ($i = $start; $i <= $end; $i++) {
+        $active = ($i == $current_page) ? 'active' : '';
+        $html .= sprintf(
+            '<li class="page-item %s"><a class="page-link" href="%s">%d</a></li>',
+            $active,
+            buildPaginationUrl($base_url, $i, $params),
+            $i
+        );
+    }
+    
+    if ($end < $total_pages) {
+        if ($end < $total_pages - 1) {
+            $html .= '<li class="page-item disabled"><span class="page-link">...</span></li>';
+        }
+        $html .= sprintf('<li class="page-item"><a class="page-link" href="%s">%d</a></li>', buildPaginationUrl($base_url, $total_pages, $params), $total_pages);
+    }
+    
+    // Next button
+    $disabled_next = ($current_page >= $total_pages) ? 'disabled' : '';
+    $next_url = ($current_page < $total_pages) ? buildPaginationUrl($base_url, $current_page + 1, $params) : '#';
+    $html .= sprintf(
+        '<li class="page-item %s"><a class="page-link" href="%s">Next &raquo;</a></li>',
+        $disabled_next,
+        $next_url
+    );
+    
+    $html .= '</ul></nav>';
+    return $html;
 }
 ?>

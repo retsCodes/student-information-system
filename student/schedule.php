@@ -17,29 +17,24 @@ $stmt->execute([$user_id]);
 $student_info = $stmt->fetch(PDO::FETCH_ASSOC);
 
 // Get current sections for this student
-$stmt = $pdo->prepare("SELECT s.id, s.section_code, s.program, s.year_level, 
-                              s.section_name
+$stmt = $pdo->prepare("SELECT s.id, s.section_code, s.program, s.year_level, s.semester, s.section_name
                        FROM sections s
                        JOIN student_sections ss ON s.id = ss.section_id
                        WHERE ss.student_id = ? AND s.status = 'active'");
 $stmt->execute([$user_id]);
 $current_sections = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get subjects for current sections
-$current_subjects = [];
-$total_units = 0;
+// Get subjects ONLY from assigned sections (via subject_sections)
+$all_subjects = [];
 $section_subjects = [];
 
 foreach ($current_sections as $section) {
+    // Get subjects from this section only
     $stmt = $pdo->prepare("SELECT sub.* 
                            FROM subjects sub
-                           JOIN student_subjects ss ON sub.id = ss.subject_id
-                           WHERE ss.student_id = ? 
-                           AND sub.id IN (
-                               SELECT subject_id FROM student_subjects 
-                               WHERE student_id = ?
-                           )");
-    $stmt->execute([$user_id, $user_id]);
+                           JOIN subject_sections ss ON sub.id = ss.subject_id
+                           WHERE ss.section_id = ?");
+    $stmt->execute([$section['id']]);
     $subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     $section_subjects[$section['id']] = [
@@ -48,30 +43,42 @@ foreach ($current_sections as $section) {
     ];
     
     foreach ($subjects as $subject) {
-        $current_subjects[$subject['id']] = $subject;
-        $total_units += $subject['units'];
+        if (!isset($all_subjects[$subject['id']])) {
+            $all_subjects[$subject['id']] = $subject;
+        }
     }
 }
 
-// Get payment status for each subject
-$payment_types = ['prelim', 'midterm', 'prefinals', 'finals'];
-$payment_status = [];
+// Calculate total units from unique subjects
+$total_units = array_sum(array_column($all_subjects, 'units'));
 
-foreach($current_subjects as $subject) {
-    foreach($payment_types as $type) {
+// Build payment status for each exam type per subject (FIXED)
+$payment_status = [];
+foreach ($all_subjects as $subject) {
+    $subject_id = $subject['id'];
+    $subject_code = $subject['subject_code'];
+    
+    foreach (['prelim', 'midterm', 'prefinals', 'finals'] as $exam_type) {
         $stmt = $pdo->prepare("SELECT payment_status FROM payments 
                                WHERE student_id = ? 
+                               AND payment_category = 'exam' 
                                AND description LIKE ? 
                                AND description LIKE ?
-                               ORDER BY issued_date DESC 
+                               ORDER BY issued_date DESC
                                LIMIT 1");
-        $stmt->execute([$user_id, "%{$type}%", "%{$subject['subject_code']}%"]);
+        $stmt->execute([$user_id, "%{$exam_type}%", "%{$subject_code}%"]);
         $status = $stmt->fetchColumn();
-        $payment_status[$subject['id']][$type] = $status ?: 'unpaid';
+        
+        // FIX: Check if $status is false (no result) and set to 'unpaid'
+        if ($status === false) {
+            $payment_status[$subject_id][$exam_type] = 'unpaid';
+        } else {
+            $payment_status[$subject_id][$exam_type] = $status;
+        }
     }
 }
 
-// Get class schedule information (you might need to create this table)
+// Get class schedule
 $class_schedule = [];
 try {
     $stmt = $pdo->prepare("SELECT cs.*, s.subject_code, s.subject_name, sec.section_code
@@ -79,14 +86,12 @@ try {
                            JOIN subjects s ON cs.subject_id = s.id
                            JOIN sections sec ON cs.section_id = sec.id
                            WHERE cs.section_id IN (
-                               SELECT section_id FROM student_sections 
-                               WHERE student_id = ?
+                               SELECT section_id FROM student_sections WHERE student_id = ?
                            )
-                           ORDER BY cs.day_of_week, cs.start_time");
+                           ORDER BY FIELD(cs.day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'), cs.start_time");
     $stmt->execute([$user_id]);
     $class_schedule = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Exception $e) {
-    // Class schedule table might not exist yet
     $class_schedule = [];
 }
 
@@ -95,23 +100,12 @@ $schedule_by_day = [
     'Monday' => [], 'Tuesday' => [], 'Wednesday' => [], 
     'Thursday' => [], 'Friday' => [], 'Saturday' => [], 'Sunday' => []
 ];
-
 foreach ($class_schedule as $class) {
     $day = $class['day_of_week'];
     if (isset($schedule_by_day[$day])) {
         $schedule_by_day[$day][] = $class;
     }
 }
-
-// Get academic summary
-$stmt = $pdo->prepare("SELECT 
-    COUNT(DISTINCT subject_id) as total_subjects,
-    SUM(s.units) as total_units
-    FROM student_subjects ss
-    JOIN subjects s ON ss.subject_id = s.id
-    WHERE ss.student_id = ?");
-$stmt->execute([$user_id]);
-$academic_summary = $stmt->fetch(PDO::FETCH_ASSOC);
 
 renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
 ?>
@@ -144,9 +138,6 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
     padding: 15px;
     border-radius: 8px;
     margin-bottom: 20px;
-}
-.subject-badge {
-    font-size: 0.75rem;
 }
 .info-card {
     background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
@@ -205,7 +196,7 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
         <div class="col-md-3">
             <div class="card summary-card text-center shadow">
                 <div class="card-body">
-                    <div class="display-6 fw-bold"><?php echo count($current_subjects); ?></div>
+                    <div class="display-6 fw-bold"><?php echo count($all_subjects); ?></div>
                     <p class="mb-0">Subjects</p>
                 </div>
             </div>
@@ -243,6 +234,7 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                 <?php foreach($section_subjects as $section_id => $data): 
                     $section = $data['section_info'];
                     $subjects = $data['subjects'];
+                    if (empty($subjects)) continue;
                 ?>
                     <div class="card mb-4 shadow">
                         <div class="section-header">
@@ -290,20 +282,21 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                                                 <p class="text-muted small mb-2"><?php echo htmlspecialchars($subject['description']); ?></p>
                                             <?php endif; ?>
 
-                                            <!-- Payment Status -->
+                                            <!-- Exam Payment Status -->
                                             <div class="mt-3">
-                                                <h6 class="small text-muted mb-2">Payment Status:</h6>
+                                                <h6 class="small text-muted mb-2">Exam Payment Status:</h6>
                                                 <div class="payment-grid">
-                                                    <?php foreach($payment_types as $type): ?>
-                                                        <?php 
-                                                        $status = $payment_status[$subject['id']][$type] ?? 'unpaid';
+                                                    <?php 
+                                                    $types = ['prelim', 'midterm', 'prefinals', 'finals'];
+                                                    foreach($types as $type): 
+                                                        $status = isset($payment_status[$subject['id']][$type]) ? $payment_status[$subject['id']][$type] : 'unpaid';
                                                         $badge_class = match($status) {
                                                             'paid' => 'success',
                                                             'partial' => 'warning',
                                                             'unpaid' => 'danger',
                                                             default => 'secondary'
                                                         };
-                                                        ?>
+                                                    ?>
                                                         <div class="text-center">
                                                             <small class="d-block text-muted"><?php echo ucfirst($type); ?></small>
                                                             <span class="badge bg-<?php echo $badge_class; ?> payment-status-badge">
@@ -384,7 +377,7 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                     </div>
                     <div class="mb-3">
                         <strong>Total Subjects:</strong>
-                        <span class="float-end"><?php echo count($current_subjects); ?></span>
+                        <span class="float-end"><?php echo count($all_subjects); ?></span>
                     </div>
                     <div class="mb-3">
                         <strong>Total Units:</strong>
@@ -407,19 +400,15 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
             <!-- Payment Legend -->
             <div class="card shadow mt-4">
                 <div class="card-body">
-                    <h6 class="card-title">Payment Status Legend:</h6>
+                    <h6 class="card-title">Exam Payment Status Legend:</h6>
                     <div class="d-flex flex-column gap-2">
                         <div>
                             <span class="badge bg-success payment-status-badge">Paid</span>
-                            <small class="text-muted ms-1">Fully paid</small>
-                        </div>
-                        <div>
-                            <span class="badge bg-warning payment-status-badge">Partial</span>
-                            <small class="text-muted ms-1">Partially paid</small>
+                            <small class="text-muted ms-1">Exam fee fully paid</small>
                         </div>
                         <div>
                             <span class="badge bg-danger payment-status-badge">Unpaid</span>
-                            <small class="text-muted ms-1">Not yet paid</small>
+                            <small class="text-muted ms-1">Exam fee not yet paid</small>
                         </div>
                     </div>
                 </div>

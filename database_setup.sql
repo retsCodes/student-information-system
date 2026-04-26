@@ -178,6 +178,25 @@ CREATE TABLE subject_sections (
     INDEX idx_subject_sections_section (section_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE student_subjects (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id VARCHAR(50) NOT NULL,
+    subject_id INT NOT NULL,
+    section_id INT NOT NULL,
+    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    assigned_by VARCHAR(50) NOT NULL,
+    reason VARCHAR(255) NULL,
+    status ENUM('active', 'dropped', 'completed') DEFAULT 'active',
+    UNIQUE KEY unique_student_subject_section (student_id, subject_id, section_id),
+    INDEX idx_student_subjects_student (student_id),
+    INDEX idx_student_subjects_subject (subject_id),
+    INDEX idx_student_subjects_section (section_id),
+    INDEX idx_student_subjects_status (status),
+    FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
+    FOREIGN KEY (section_id) REFERENCES sections(id) ON DELETE CASCADE,
+    FOREIGN KEY (assigned_by) REFERENCES users(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =======================================================
 -- CLASS_SCHEDULE TABLE
@@ -240,16 +259,20 @@ CREATE TABLE payments (
     student_id VARCHAR(50) NOT NULL,
     permit_number VARCHAR(20) UNIQUE NOT NULL,
     amount DECIMAL(10,2) NOT NULL,
+    amount_text VARCHAR(255) NULL,                      
     remaining_balance DECIMAL(10,2) DEFAULT 0,
     payment_status ENUM('paid', 'unpaid', 'partial') DEFAULT 'unpaid',
     description TEXT,
+    notes TEXT NULL,                                    
     issued_date DATE NOT NULL,
     issued_by VARCHAR(50) NOT NULL,
     school_year VARCHAR(20),
     payment_category ENUM('tuition', 'exam', 'misc', 'other') DEFAULT 'other',
     units INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (issued_by) REFERENCES users(user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =======================================================
