@@ -22,7 +22,7 @@ if ($is_local) {
     define('DB_NAME', 'student_info_tracker');
 } else {
     // Cloud InfinityFree configuration
-    define('DB_HOST', 'sql123.infinityfree.com');  // Your InfinityFree MySQL host
+    define('DB_HOST', 'if0_41761335_student_db.infinityfree.com');  // Your InfinityFree MySQL host
     define('DB_USER', 'if0_41761335');              // Your database username
     define('DB_PASS', 'passtenword');       // Your database password
     define('DB_NAME', 'if0_41761335_student_db');   // Your database name
