@@ -533,6 +533,233 @@ case 'get_profile':
             
         default:
             throw new Exception('Invalid action: ' . $action);
+            // Add this case after the 'dashboard' case in your mobile_api.php
+
+case 'get_academic_progress':
+    $user_id = sanitizeInput($input['user_id'] ?? '');
+    $token = sanitizeInput($input['token'] ?? '');
+    
+    if (empty($user_id) || empty($token)) {
+        throw new Exception('Authentication required');
+    }
+    
+    // Verify token
+    $stmt = $pdo->prepare("
+        SELECT * FROM mobile_tokens 
+        WHERE user_id = ? AND token = ? AND expires_at > NOW()
+    ");
+    $stmt->execute([$user_id, $token]);
+    $tokenData = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$tokenData) {
+        throw new Exception('Invalid or expired session');
+    }
+    
+    // Get student info
+    $stmt = $pdo->prepare("
+        SELECT si.*, u.name, u.email
+        FROM students_info si 
+        JOIN users u ON si.user_id = u.user_id 
+        WHERE si.user_id = ?
+    ");
+    $stmt->execute([$user_id]);
+    $student_info = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    $program = $student_info['program'] ?? '';
+    $current_year_level = $student_info['year_level'] ?? 1;
+    $is_irregular = ($student_info['student_type'] ?? 'regular') === 'irregular';
+    
+    // Find course by program
+    $stmt = $pdo->prepare("SELECT id, course_code, course_name, total_units FROM courses LIMIT 1");
+    $stmt->execute();
+    $course = $stmt->fetch(PDO::FETCH_ASSOC);
+    $course_id = $course['id'] ?? null;
+    
+    // Get assigned subjects
+    $stmt = $pdo->prepare("
+        SELECT DISTINCT s.*, sec.year_level as section_year, sec.semester as section_semester
+        FROM student_sections ss
+        JOIN sections sec ON ss.section_id = sec.id
+        JOIN subject_sections subsec ON sec.id = subsec.section_id
+        JOIN subjects s ON subsec.subject_id = s.id
+        WHERE ss.student_id = ?
+    ");
+    $stmt->execute([$user_id]);
+    $assigned_subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Get curriculum subjects
+    $curriculum_subjects = [];
+    if ($course_id) {
+        $stmt = $pdo->prepare("
+            SELECT s.*, cc.year_level, cc.semester
+            FROM course_curriculum cc
+            JOIN subjects s ON cc.subject_id = s.id
+            WHERE cc.course_id = ?
+            ORDER BY cc.year_level, FIELD(cc.semester, '1st', '2nd'), s.subject_code
+        ");
+        $stmt->execute([$course_id]);
+        $curriculum_subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+    
+    // Get grades/completion records
+    $stmt = $pdo->prepare("
+        SELECT subject_id, grade, date_completed, status, year_level, semester
+        FROM student_course_completion 
+        WHERE student_id = ?
+    ");
+    $stmt->execute([$user_id]);
+    $completions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $completion_map = [];
+    foreach ($completions as $c) {
+        $key = $c['subject_id'] . '_' . ($c['year_level'] ?? '') . '_' . ($c['semester'] ?? '');
+        $completion_map[$key] = $c;
+    }
+    
+    // Build curriculum data
+    $curriculum_data = [];
+    $overall_total_units = 0;
+    $completed_count = 0;
+    $in_progress_count = 0;
+    $total_grades = 0;
+    $grade_count = 0;
+    
+    foreach ($curriculum_subjects as $subject) {
+        $year = $subject['year_level'];
+        $semester = $subject['semester'];
+        $key = $subject['id'] . '_' . $year . '_' . $semester;
+        
+        $is_taking = false;
+        foreach ($assigned_subjects as $assigned) {
+            if ($assigned['id'] == $subject['id']) {
+                $is_taking = true;
+                break;
+            }
+        }
+        
+        if (isset($completion_map[$key])) {
+            $completion = $completion_map[$key];
+            $grade = $completion['grade'];
+            $status = $completion['status'];
+            $is_completed = true;
+            if ($grade && $grade <= 3.0) {
+                $total_grades += $grade;
+                $grade_count++;
+            }
+            $completed_count++;
+        } else {
+            $grade = null;
+            $status = $is_taking ? 'current' : 'not_taken';
+            $is_completed = false;
+            if ($status == 'current') {
+                $in_progress_count++;
+            }
+        }
+        
+        $overall_total_units += $subject['units'];
+        
+        $curriculum_data[$year][$semester][] = [
+            'subject_code' => $subject['subject_code'],
+            'subject_name' => $subject['subject_name'],
+            'units' => $subject['units'],
+            'grade' => $grade,
+            'status' => $status,
+            'is_taking' => $is_taking,
+            'is_completed' => $is_completed,
+            'date_received' => $completion['date_completed'] ?? null
+        ];
+    }
+    
+    // Build response structure
+    $years_data = [];
+    for ($y = 1; $y <= 4; $y++) {
+        if (!isset($curriculum_data[$y])) continue;
+        
+        $year_status = $y < $current_year_level ? 'completed' : ($y == $current_year_level ? 'current' : 'upcoming');
+        $semesters_data = [];
+        
+        foreach (['1st', '2nd'] as $sem) {
+            if (isset($curriculum_data[$y][$sem]) && !empty($curriculum_data[$y][$sem])) {
+                $semester_units = array_sum(array_column($curriculum_data[$y][$sem], 'units'));
+                $semesters_data[] = [
+                    'semester' => $sem,
+                    'total_units' => $semester_units,
+                    'subjects' => $curriculum_data[$y][$sem]
+                ];
+            }
+        }
+        
+        if (!empty($semesters_data)) {
+            $years_data[] = [
+                'year' => $y,
+                'status' => $year_status,
+                'semesters' => $semesters_data
+            ];
+        }
+    }
+    
+    $avg_grade = $grade_count > 0 ? round($total_grades / $grade_count, 2) : null;
+    
+    $response['success'] = true;
+    $response['data'] = [
+        'total_subjects' => count($curriculum_subjects),
+        'completed_count' => $completed_count,
+        'in_progress_count' => $in_progress_count,
+        'avg_grade' => $avg_grade,
+        'total_units' => $overall_total_units,
+        'student_type' => $is_irregular ? 'irregular' : 'regular',
+        'curriculum' => $years_data
+    ];
+    break;
+
+case 'get_full_schedule':
+    $user_id = sanitizeInput($input['user_id'] ?? '');
+    $token = sanitizeInput($input['token'] ?? '');
+    
+    if (empty($user_id) || empty($token)) {
+        throw new Exception('Authentication required');
+    }
+    
+    // Verify token
+    $stmt = $pdo->prepare("
+        SELECT * FROM mobile_tokens 
+        WHERE user_id = ? AND token = ? AND expires_at > NOW()
+    ");
+    $stmt->execute([$user_id, $token]);
+    $tokenData = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$tokenData) {
+        throw new Exception('Invalid or expired session');
+    }
+    
+    // Get class schedule with times
+    $stmt = $pdo->prepare("
+        SELECT cs.*, s.subject_code, s.subject_name, sec.section_code
+        FROM class_schedule cs
+        JOIN subjects s ON cs.subject_id = s.id
+        JOIN sections sec ON cs.section_id = sec.id
+        WHERE cs.section_id IN (
+            SELECT section_id FROM student_sections WHERE student_id = ?
+        )
+        ORDER BY FIELD(cs.day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'), cs.start_time
+    ");
+    $stmt->execute([$user_id]);
+    $schedule = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $response['success'] = true;
+    $response['data'] = array_map(function($class) {
+        return [
+            'subject_code' => $class['subject_code'],
+            'subject_name' => $class['subject_name'],
+            'day_of_week' => $class['day_of_week'],
+            'start_time' => date('g:i A', strtotime($class['start_time'])),
+            'end_time' => date('g:i A', strtotime($class['end_time'])),
+            'room' => $class['room'] ?? 'TBA',
+            'section_code' => $class['section_code']
+        ];
+    }, $schedule);
+    break;
+    
     }
     
 } catch (Exception $e) {

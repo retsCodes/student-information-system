@@ -252,6 +252,44 @@ CREATE TABLE student_course_enrollment (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =======================================================
+-- GRADES TABLE (Add this to your existing schema)
+-- =======================================================
+CREATE TABLE IF NOT EXISTS grades (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id VARCHAR(50) NOT NULL,
+    subject_id INT NOT NULL,
+    grade DECIMAL(4,2) NULL,
+    date_received DATE NULL,
+    remarks TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_student_subject (student_id, subject_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =======================================================
+-- STUDENT_COURSE_COMPLETION TABLE (Tracks completed subjects per semester)
+-- =======================================================
+CREATE TABLE IF NOT EXISTS student_course_completion (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id VARCHAR(50) NOT NULL,
+    subject_id INT NOT NULL,
+    year_level INT NOT NULL,
+    semester ENUM('1st', '2nd', 'summer') NOT NULL,
+    academic_year VARCHAR(20) NOT NULL,
+    grade DECIMAL(4,2) NULL,
+    date_completed DATE NULL,
+    status ENUM('completed', 'in_progress', 'failed', 'dropped') DEFAULT 'completed',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_student_subject_completion (student_id, subject_id, year_level, semester),
+    INDEX idx_student_completion (student_id, year_level, semester)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =======================================================
 -- PAYMENTS TABLE
 -- =======================================================
 CREATE TABLE payments (
@@ -465,3 +503,7 @@ CREATE INDEX idx_activity_date ON activity_logs(created_at);
 CREATE INDEX idx_settings_category ON settings(category);
 CREATE INDEX idx_mobile_user ON mobile_tokens(user_id);
 CREATE INDEX idx_mobile_expires ON mobile_tokens(expires_at);
+CREATE INDEX idx_completion_student_subject ON student_course_completion(student_id, subject_id, year_level, semester);
+CREATE INDEX idx_completion_status ON student_course_completion(status);
+CREATE INDEX idx_schedule_day_time ON class_schedule(day_of_week, start_time);
+CREATE INDEX idx_payments_student_status ON payments(student_id, payment_status);

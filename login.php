@@ -108,6 +108,61 @@ else if (empty($password)) {
         }
     }
 }
+
+
+// Auto-sync function that runs on every login
+function autoSyncToCloud() {
+    // Only run on local machine
+    $is_local = (DB_HOST == 'localhost');
+    if (!$is_local) return true; // Already on cloud, no sync needed
+    
+    try {
+        // Cloud database connection
+        $pdo_cloud = new PDO(
+            "mysql:host=sql123.infinityfree.com;dbname=if0_41761335_student_db",
+            'if0_41761335',
+            'YOUR_CLOUD_PASSWORD'
+        );
+        
+        $pdo_local = getDBConnection();
+        
+        // Tables to sync
+        $tables = ['users', 'students_info', 'payments', 'student_course_completion', 'activity_logs'];
+        
+        $synced = 0;
+        
+        foreach ($tables as $table) {
+            // Get records from last hour that aren't in cloud
+            $stmt = $pdo_local->prepare("
+                SELECT * FROM $table 
+                WHERE created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+                AND id NOT IN (SELECT id FROM $table)
+            ");
+            $stmt->execute();
+            $new_records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            foreach ($new_records as $record) {
+                $columns = implode(',', array_keys($record));
+                $placeholders = ':' . implode(',:', array_keys($record));
+                $insert = $pdo_cloud->prepare("INSERT INTO $table ($columns) VALUES ($placeholders)");
+                $insert->execute($record);
+                $synced++;
+            }
+        }
+        
+        if ($synced > 0) {
+            error_log("Auto-synced $synced records to cloud");
+        }
+        
+        return true;
+    } catch (Exception $e) {
+        error_log("Auto-sync failed: " . $e->getMessage());
+        return false;
+    }
+}
+
+// Run auto-sync on every login (but don't block login if it fails)
+autoSyncToCloud();
 ?>
 <!DOCTYPE html>
 <html lang="en" <?php echo getThemeAttributes(); ?>>

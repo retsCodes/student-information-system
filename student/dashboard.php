@@ -16,14 +16,17 @@ $stmt = $pdo->prepare("SELECT si.*, u.email as user_email
 $stmt->execute([$user_id]);
 $student_info = $stmt->fetch(PDO::FETCH_ASSOC);
 
-// Get payment statistics
 $stmt = $pdo->prepare("SELECT 
-                        COUNT(*) as total_payments,
-                        SUM(CASE WHEN payment_status = 'unpaid' THEN 1 ELSE 0 END) as unpaid_count,
-                        SUM(CASE WHEN payment_status = 'paid' THEN 1 ELSE 0 END) as paid_count,
-                        SUM(CASE WHEN payment_status = 'partial' THEN 1 ELSE 0 END) as partial_count,
-                        SUM(CASE WHEN payment_status = 'unpaid' THEN amount ELSE 0 END) as total_due,
-                        SUM(CASE WHEN payment_status = 'paid' THEN amount ELSE 0 END) as total_paid
+                        COALESCE(COUNT(*), 0) as total_payments,
+                        COALESCE(SUM(CASE WHEN payment_status IN ('unpaid', 'partial') THEN 1 ELSE 0 END), 0) as unpaid_count,
+                        COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN 1 ELSE 0 END), 0) as paid_count,
+                        COALESCE(SUM(CASE WHEN payment_status = 'partial' THEN 1 ELSE 0 END), 0) as partial_count,
+                        COALESCE(SUM(CASE 
+                            WHEN payment_status = 'unpaid' THEN remaining_balance
+                            WHEN payment_status = 'partial' THEN remaining_balance 
+                            ELSE 0 
+                        END), 0) as total_due,
+                        COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN amount ELSE 0 END), 0) as total_paid
                        FROM payments 
                        WHERE student_id = ?");
 $stmt->execute([$user_id]);
@@ -39,6 +42,31 @@ $stmt = $pdo->prepare("SELECT p.*, u.name as issued_by_name
 $stmt->execute([$user_id]);
 $recent_payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Get current subjects (from student_sections)
+$stmt = $pdo->prepare("
+    SELECT DISTINCT s.subject_code, s.subject_name, s.units, sec.section_code
+    FROM student_sections ss
+    JOIN sections sec ON ss.section_id = sec.id
+    JOIN subject_sections subsec ON sec.id = subsec.section_id
+    JOIN subjects s ON subsec.subject_id = s.id
+    WHERE ss.student_id = ?
+    LIMIT 5
+");
+$stmt->execute([$user_id]);
+$current_subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get academic progress summary
+$stmt = $pdo->prepare("
+    SELECT 
+        COUNT(*) as total_subjects,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
+        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_count,
+        ROUND(AVG(CASE WHEN grade IS NOT NULL AND grade <= 3.0 THEN grade END), 2) as avg_grade
+    FROM student_course_completion
+    WHERE student_id = ?
+");
+$stmt->execute([$user_id]);
+$academic_stats = $stmt->fetch(PDO::FETCH_ASSOC);
 
 // Get recent activities related to this student
 $stmt = $pdo->prepare("SELECT al.*, u.name 
@@ -70,19 +98,55 @@ renderPageStart('Student Dashboard', 'student', 'dashboard.php');
     </div>
 </div>
 
-<!-- Statistics Cards -->
+<!-- Statistics Cards - Financial -->
 <div class="row mb-4">
     <div class="col-md-3 mb-3">
-        <?php echo renderStatsCard('Total Payments', $payment_stats['total_payments'], 'fas fa-file-invoice-dollar', 'primary'); ?>
+        <?php echo renderStatsCard('Total Payments', $payment_stats['total_payments'] ?? 0, 'fas fa-file-invoice-dollar', 'primary'); ?>
     </div>
     <div class="col-md-3 mb-3">
-        <?php echo renderStatsCard('Due Payments', $payment_stats['unpaid_count'], 'fas fa-exclamation-triangle', 'warning'); ?>
+        <?php echo renderStatsCard('Due Payments', $payment_stats['unpaid_count'] ?? 0, 'fas fa-exclamation-triangle', 'warning'); ?>
     </div>
     <div class="col-md-3 mb-3">
-        <?php echo renderStatsCard('Total Due Amount', '₱' . number_format($payment_stats['total_due'], 2), 'fas fa-money-bill-wave', 'danger'); ?>
+        <?php echo renderStatsCard('Total Due', '₱' . number_format($payment_stats['total_due'] ?? 0, 2), 'fas fa-money-bill-wave', 'danger'); ?>
     </div>
     <div class="col-md-3 mb-3">
-        <?php echo renderStatsCard('Paid Amount', '₱' . number_format($payment_stats['total_paid'], 2), 'fas fa-check-circle', 'success'); ?>
+        <?php echo renderStatsCard('Paid Amount', '₱' . number_format($payment_stats['total_paid'] ?? 0, 2), 'fas fa-check-circle', 'success'); ?>
+    </div>
+</div>
+
+<!-- Academic Progress Stats -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>Academic Progress Overview</h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <div class="h2 text-primary"><?php echo $academic_stats['total_subjects'] ?? 0; ?></div>
+                        <small>Total Subjects</small>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="h2 text-success"><?php echo $academic_stats['completed_count'] ?? 0; ?></div>
+                        <small>Completed</small>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="h2 text-warning"><?php echo $academic_stats['in_progress_count'] ?? 0; ?></div>
+                        <small>In Progress</small>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="h2 text-info"><?php echo $academic_stats['avg_grade'] ?? '—'; ?></div>
+                        <small>Average Grade</small>
+                    </div>
+                </div>
+                <div class="text-center mt-3">
+                    <a href="academic_progress.php" class="btn btn-outline-primary">
+                        <i class="fas fa-graduation-cap"></i> View Full Academic Progress
+                    </a>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -129,7 +193,7 @@ renderPageStart('Student Dashboard', 'student', 'dashboard.php');
         <?php
         $subjects_content = '';
         if (empty($current_subjects)) {
-            $subjects_content = '<p class="text-muted">No subjects enrolled.</p>';
+            $subjects_content = '<p class="text-muted">No subjects currently enrolled.</p>';
         } else {
             $subjects_content = '<div class="list-group list-group-flush">';
             foreach($current_subjects as $subject) {
@@ -146,7 +210,7 @@ renderPageStart('Student Dashboard', 'student', 'dashboard.php');
             $subjects_content .= '</div>';
         }
         
-        $subjects_footer = '<a href="schedule.php" class="btn btn-primary">View Schedule</a>';
+        $subjects_footer = '<a href="academic_progress.php" class="btn btn-primary">View Full Study Load</a>';
         echo renderCard('Current Subjects', $subjects_content, $subjects_footer);
         ?>
     </div>
@@ -188,8 +252,11 @@ renderPageStart('Student Dashboard', 'student', 'dashboard.php');
             <a href="payments.php" class="btn btn-outline-primary">
                 <i class="fas fa-money-bill-wave"></i> View My Payments
             </a>
-            <a href="schedule.php" class="btn btn-outline-info">
-                <i class="fas fa-calendar-alt"></i> View My Schedule
+            <a href="academic_progress.php" class="btn btn-outline-info">
+                <i class="fas fa-graduation-cap"></i> Academic Progress
+            </a>
+            <a href="schedule.php" class="btn btn-outline-secondary">
+                <i class="fas fa-calendar-alt"></i> Class Schedule
             </a>
             <a href="profile.php" class="btn btn-outline-success">
                 <i class="fas fa-user"></i> Update Profile
@@ -202,14 +269,14 @@ renderPageStart('Student Dashboard', 'student', 'dashboard.php');
 </div>
 
 <!-- Important Notices -->
-<?php if ($payment_stats['unpaid_count'] > 0): ?>
+<?php if (($payment_stats['total_due'] ?? 0) > 0): ?>
 <div class="row">
     <div class="col-12">
         <div class="alert alert-warning">
             <h5 class="alert-heading">
                 <i class="fas fa-exclamation-triangle"></i> Payment Reminder
             </h5>
-            <p>You have <strong><?php echo $payment_stats['unpaid_count']; ?></strong> unpaid payment(s) 
+            <p>You have <strong><?php echo $payment_stats['unpaid_count']; ?></strong> payment(s) with outstanding balance 
                totaling <strong>₱<?php echo number_format($payment_stats['total_due'], 2); ?></strong>.</p>
             <hr>
             <p class="mb-0">

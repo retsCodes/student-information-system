@@ -93,38 +93,46 @@ try {
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
             exit;
-
-        case 'get_student_total_units':
-            $student_id = $_GET['student_id'] ?? '';
-
-            if (empty($student_id)) {
-                echo json_encode(['success' => false, 'message' => 'Student ID required']);
-                exit;
-            }
-
-            try {
-                // Get total units from student's assigned subjects (unique, no duplicates)
-                $stmt = $pdo->prepare("
-                            SELECT COALESCE(SUM(DISTINCT s.units), 0) as total_units
-                            FROM (
-                                SELECT subject_id FROM student_sections ss
-                                JOIN subject_sections subsec ON ss.section_id = subsec.section_id
-                                WHERE ss.student_id = ?
-                                UNION
-                                SELECT subject_id FROM student_subjects WHERE student_id = ? AND status = 'active'
-                            ) AS all_subjects
-                            JOIN subjects s ON all_subjects.subject_id = s.id
-                        ");
-                $stmt->execute([$student_id, $student_id]);
-                $total_units = $stmt->fetchColumn();
-
-                echo json_encode(['success' => true, 'total_units' => $total_units]);
-                exit;
-            } catch (Exception $e) {
-                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
-                exit;
-            }
-            break;
+            case 'get_student_total_units':
+                $student_id = $_GET['student_id'] ?? '';
+            
+                if (empty($student_id)) {
+                    echo json_encode(['success' => false, 'message' => 'Student ID required']);
+                    exit;
+                }
+            
+                try {
+                    $pdo = getDBConnection();
+                    
+                    $stmt = $pdo->prepare("
+                        SELECT COALESCE(SUM(s.units), 0) as total_units,
+                               COUNT(DISTINCT s.id) as total_subjects
+                        FROM (
+                            SELECT subject_id FROM student_sections ss
+                            JOIN subject_sections subsec ON ss.section_id = subsec.section_id
+                            WHERE ss.student_id = ?
+                            UNION
+                            SELECT subject_id FROM student_subjects WHERE student_id = ? AND status = 'active'
+                        ) AS all_subjects
+                        JOIN subjects s ON all_subjects.subject_id = s.id
+                        WHERE s.units IS NOT NULL AND s.units > 0
+                    ");
+                    $stmt->execute([$student_id, $student_id]);
+                    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                    
+                    $total_units = $result['total_units'] ?? 0;
+                    $total_subjects = $result['total_subjects'] ?? 0;
+                    
+                    $stmt = $pdo->prepare("UPDATE students_info SET total_units = ? WHERE user_id = ?");
+                    $stmt->execute([$total_units, $student_id]);
+            
+                    echo json_encode(['success' => true, 'total_units' => $total_units, 'total_subjects' => $total_subjects]);
+                    exit;
+                } catch (Exception $e) {
+                    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+                    exit;
+                }
+                break;
 
         case 'get_course_details':
             $course_id = intval($_GET['course_id'] ?? 0);
@@ -319,46 +327,266 @@ try {
             $response = getUserDetails($pdo, $user_id);
             break;
 
-        case 'get_student_info':
-            $search = $_GET['search'] ?? '';
-            $student_id = $_GET['student_id'] ?? '';
-
-            if ($student_id) {
-                // Use the existing getStudentInfo function from init.php
-                $student = getStudentInfo($student_id);
-                if ($student) {
-                    // Also get user name from users table
-                    $user = getUserInfo($student_id);
-                    $student['name'] = $user['name'] ?? '';
-                    echo json_encode(['success' => true, 'student' => $student]);
-                } else {
-                    echo json_encode(['success' => false, 'message' => 'Student not found']);
+            case 'get_student_info':
+                $search = $_GET['search'] ?? '';
+                $student_id = $_GET['student_id'] ?? '';
+            
+                if ($student_id) {
+                    try {
+                        $pdo = getDBConnection();
+                        
+                        $stmt = $pdo->prepare("
+                            SELECT 
+                                si.*,
+                                u.name,
+                                u.email,
+                                u.user_status as status
+                            FROM students_info si
+                            JOIN users u ON si.user_id = u.user_id
+                            WHERE si.user_id = ? AND u.role = 'student'
+                        ");
+                        $stmt->execute([$student_id]);
+                        $student = $stmt->fetch(PDO::FETCH_ASSOC);
+                        
+                        if ($student) {
+                            $stmt = $pdo->prepare("
+                                SELECT COALESCE(SUM(s.units), 0) as total_units,
+                                       COUNT(DISTINCT s.id) as total_subjects
+                                FROM (
+                                    SELECT subject_id FROM student_sections ss
+                                    JOIN subject_sections subsec ON ss.section_id = subsec.section_id
+                                    WHERE ss.student_id = ?
+                                    UNION
+                                    SELECT subject_id FROM student_subjects WHERE student_id = ? AND status = 'active'
+                                ) AS all_subjects
+                                JOIN subjects s ON all_subjects.subject_id = s.id
+                                WHERE s.units IS NOT NULL AND s.units > 0
+                            ");
+                            $stmt->execute([$student_id, $student_id]);
+                            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                            
+                            $total_units = $result['total_units'] ?? 0;
+                            $total_subjects = $result['total_subjects'] ?? 0;
+                            
+                            $student['total_units'] = $total_units;
+                            $student['total_subjects'] = $total_subjects;
+                            
+                            $stmt = $pdo->prepare("UPDATE students_info SET total_units = ? WHERE user_id = ?");
+                            $stmt->execute([$total_units, $student_id]);
+                            
+                            echo json_encode(['success' => true, 'student' => $student]);
+                        } else {
+                            echo json_encode(['success' => false, 'message' => 'Student not found']);
+                        }
+                    } catch (Exception $e) {
+                        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+                    }
+                    exit;
+            
+                } elseif ($search && strlen($search) >= 2) {
+                    try {
+                        $pdo = getDBConnection();
+                        $stmt = $pdo->prepare("
+                            SELECT u.user_id, u.name, si.program, si.year_level, si.total_units
+                            FROM users u
+                            JOIN students_info si ON u.user_id = si.user_id
+                            WHERE u.role = 'student' 
+                            AND (u.user_id LIKE ? OR u.name LIKE ?)
+                            AND u.user_status = 'active'
+                            LIMIT 20
+                        ");
+                        $search_param = "%$search%";
+                        $stmt->execute([$search_param, $search_param]);
+                        $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                        
+                        echo json_encode(['success' => true, 'students' => $students]);
+                    } catch (Exception $e) {
+                        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+                    }
+                    exit;
                 }
+            
+                echo json_encode(['success' => false, 'message' => 'No search term provided or search too short']);
                 exit;
+                break;
 
-            } elseif ($search && strlen($search) >= 2) {
-                // Search students - direct query (getStudentInfo doesn't support search)
-                $pdo = getDBConnection();
-                $stmt = $pdo->prepare("
-                        SELECT u.user_id, u.name, si.program, si.year_level
-                        FROM users u
-                        JOIN students_info si ON u.user_id = si.user_id
-                        WHERE u.role = 'student' 
-                        AND (u.user_id LIKE ? OR u.name LIKE ?)
-                        AND u.user_status = 'active'
-                        LIMIT 20
-                    ");
-                $search_param = "%$search%";
-                $stmt->execute([$search_param, $search_param]);
-                $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-                echo json_encode(['success' => true, 'students' => $students]);
-                exit;
-            }
-
-            echo json_encode(['success' => false, 'message' => 'No search term provided or search too short']);
-            exit;
-            break;
+                case 'get_student_grades':
+                    $student_id = $_GET['student_id'] ?? '';
+                    
+                    if (empty($student_id)) {
+                        echo json_encode(['success' => false, 'message' => 'Student ID required']);
+                        exit;
+                    }
+                    
+                    try {
+                        $pdo = getDBConnection();
+                        
+                        // First, get student basic info and find their course_id
+                        $stmt = $pdo->prepare("
+                            SELECT si.*, u.name, u.email, c.id as course_id, c.course_code, c.course_name
+                            FROM students_info si
+                            JOIN users u ON si.user_id = u.user_id
+                            LEFT JOIN courses c ON si.course_id = c.id
+                            WHERE si.user_id = ?
+                        ");
+                        $stmt->execute([$student_id]);
+                        $student = $stmt->fetch(PDO::FETCH_ASSOC);
+                        
+                        if (!$student) {
+                            echo json_encode(['success' => false, 'message' => 'Student not found']);
+                            exit;
+                        }
+                        
+                        // If no course_id, try to find by program name
+                        $course_id = $student['course_id'];
+                        if (!$course_id && $student['program']) {
+                            $stmt = $pdo->prepare("SELECT id FROM courses WHERE course_name = ? OR course_code = ?");
+                            $stmt->execute([$student['program'], $student['program']]);
+                            $course = $stmt->fetch(PDO::FETCH_ASSOC);
+                            if ($course) {
+                                $course_id = $course['id'];
+                            }
+                        }
+                        
+                        // Get all curriculum subjects for this student's course
+                        if ($course_id) {
+                            $stmt = $pdo->prepare("
+                                SELECT DISTINCT s.id, s.subject_code, s.subject_name, s.units, cc.year_level, cc.semester
+                                FROM course_curriculum cc
+                                JOIN subjects s ON cc.subject_id = s.id
+                                WHERE cc.course_id = ?
+                                ORDER BY cc.year_level, FIELD(cc.semester, '1st', '2nd', 'summer'), s.subject_code
+                            ");
+                            $stmt->execute([$course_id]);
+                        } else {
+                            // Fallback: get subjects by program name from subjects table
+                            $stmt = $pdo->prepare("
+                                SELECT DISTINCT s.id, s.subject_code, s.subject_name, s.units, s.year_level, s.semester
+                                FROM subjects s
+                                WHERE s.program = ? OR s.program = 'General Education'
+                                ORDER BY s.year_level, FIELD(s.semester, '1st', '2nd', 'summer'), s.subject_code
+                            ");
+                            $stmt->execute([$student['program']]);
+                        }
+                        $curriculum = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                        
+                        // If no curriculum found, show error but with empty data
+                        if (empty($curriculum)) {
+                            echo json_encode(['success' => true, 'grades' => [], 'student' => $student, 'message' => 'No curriculum found for this student']);
+                            exit;
+                        }
+                        
+                        // Get existing completion records
+                        $stmt = $pdo->prepare("
+                            SELECT * FROM student_course_completion 
+                            WHERE student_id = ?
+                        ");
+                        $stmt->execute([$student_id]);
+                        $completions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                        
+                        // Merge curriculum with completion data
+                        $grades = [];
+                        foreach ($curriculum as $subject) {
+                            $found = false;
+                            foreach ($completions as $completion) {
+                                if ($completion['subject_id'] == $subject['id'] && 
+                                    $completion['year_level'] == $subject['year_level'] && 
+                                    $completion['semester'] == $subject['semester']) {
+                                    $grades[] = [
+                                        'subject_id' => $subject['id'],
+                                        'subject_code' => $subject['subject_code'],
+                                        'subject_name' => $subject['subject_name'],
+                                        'units' => $subject['units'],
+                                        'year_level' => $subject['year_level'],
+                                        'semester' => $subject['semester'],
+                                        'grade' => $completion['grade'],
+                                        'date_completed' => $completion['date_completed'],
+                                        'status' => $completion['status']
+                                    ];
+                                    $found = true;
+                                    break;
+                                }
+                            }
+                            if (!$found) {
+                                // Determine default status based on year level vs current student year
+                                $default_status = 'upcoming';
+                                if ($subject['year_level'] < $student['year_level']) {
+                                    $default_status = 'pending';
+                                } elseif ($subject['year_level'] == $student['year_level']) {
+                                    $default_status = 'in_progress';
+                                }
+                                
+                                $grades[] = [
+                                    'subject_id' => $subject['id'],
+                                    'subject_code' => $subject['subject_code'],
+                                    'subject_name' => $subject['subject_name'],
+                                    'units' => $subject['units'],
+                                    'year_level' => $subject['year_level'],
+                                    'semester' => $subject['semester'],
+                                    'grade' => null,
+                                    'date_completed' => null,
+                                    'status' => $default_status
+                                ];
+                            }
+                        }
+                        
+                        echo json_encode(['success' => true, 'grades' => $grades, 'student' => $student]);
+                        exit;
+                    } catch (Exception $e) {
+                        echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+                        exit;
+                    }
+                    break;
+                
+                    case 'save_student_grades':
+                        $data = json_decode(file_get_contents('php://input'), true);
+                        $student_id = $data['student_id'] ?? '';
+                        $grades = $data['grades'] ?? [];
+                        
+                        if (empty($student_id)) {
+                            echo json_encode(['success' => false, 'message' => 'Student ID required']);
+                            exit;
+                        }
+                        
+                        try {
+                            $pdo = getDBConnection();
+                            $pdo->beginTransaction();
+                            
+                            foreach ($grades as $grade) {
+                                $academic_year_start = 2022 + ($grade['year_level'] - 1);
+                                $academic_year = $academic_year_start . '-' . ($academic_year_start + 1);
+                                
+                                $stmt = $pdo->prepare("
+                                    INSERT INTO student_course_completion 
+                                    (student_id, subject_id, year_level, semester, academic_year, grade, date_completed, status)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                    ON DUPLICATE KEY UPDATE
+                                    grade = VALUES(grade),
+                                    date_completed = VALUES(date_completed),
+                                    status = VALUES(status),
+                                    updated_at = NOW()
+                                ");
+                                $stmt->execute([
+                                    $student_id,
+                                    $grade['subject_id'],
+                                    $grade['year_level'],
+                                    $grade['semester'],
+                                    $academic_year,
+                                    !empty($grade['grade']) ? $grade['grade'] : null,
+                                    !empty($grade['date_completed']) ? $grade['date_completed'] : null,
+                                    $grade['status']
+                                ]);
+                            }
+                            
+                            $pdo->commit();
+                            echo json_encode(['success' => true, 'message' => 'Grades saved successfully']);
+                            exit;
+                        } catch (Exception $e) {
+                            $pdo->rollBack();
+                            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+                            exit;
+                        }
+                        break;
 
         // =======================================================
         // SUBJECT & SECTION RELATED ACTIONS

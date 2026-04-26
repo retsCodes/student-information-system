@@ -661,47 +661,42 @@ renderPageStart('Manage Payments', 'admin', 'manage_payments.php');
             </div>
 
             <!-- Units Section for Exam Fees -->
-            <div class="row mb-3" id="units_section" style="display: none;">
-                <div class="col-md-4 mb-3">
-                    <label for="exam_type" class="form-label">Exam Type</label>
-                    <select class="form-select" id="exam_type" name="exam_type" onchange="updateExamDescription()">
-                        <option value="prelim">Prelim Examination</option>
-                        <option value="midterm">Midterm Examination</option>
-                        <option value="prefinals">Prefinals Examination</option>
-                        <option value="finals">Final Examination</option>
-                    </select>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label for="exam_subject" class="form-label">Subject</label>
-                    <select class="form-select" id="exam_subject" name="exam_subject" onchange="updateExamDescription()">
-                        <option value="">-- Select Subject --</option>
-                    </select>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label for="units" class="form-label">Units for this Subject</label>
-                    <input type="number" class="form-control" id="units" name="units" min="0" max="10" value="0" readonly>
-                </div>
-                <div class="col-md-3 mb-3">
-                    <label for="units" class="form-label">Number of Units</label>
-                    <div class="input-group">
-                        <input type="number" class="form-control" id="units" name="units" min="0" max="50" value="0" readonly>
-                        <button type="button" class="btn btn-outline-secondary" onclick="recalcStudentUnits(document.getElementById('student_id').value)">
-                            <i class="fas fa-sync-alt"></i>
-                        </button>
-                    </div>
-                    <div class="form-text">Total enrolled units from student's study load</div>
-                </div>
-                <div class="col-md-3 mb-3">
-                    <label for="unit_price_display" class="form-label">Unit Price</label>
-                    <input type="text" class="form-control" id="unit_price_display" value="₱<?php echo number_format($global_unit_price, 2); ?>" readonly>
-                    <div class="form-text">Per unit price (from settings)</div>
-                </div>
-                <div class="col-md-3 mb-3">
-                    <label for="exam_amount" class="form-label">Exam Fee Amount</label>
-                    <input type="number" class="form-control" id="exam_amount" name="exam_amount" readonly>
-                    <div class="form-text">Automatically calculated</div>
-                </div>
-            </div>
+<div class="row mb-3" id="units_section" style="display: none;">
+    <div class="col-md-3 mb-3">
+        <label for="exam_type" class="form-label">Exam Type</label>
+        <select class="form-select" id="exam_type" name="exam_type" onchange="updateExamDescription()">
+            <option value="prelim">Prelim Examination</option>
+            <option value="midterm">Midterm Examination</option>
+            <option value="prefinals">Prefinals Examination</option>
+            <option value="finals">Final Examination</option>
+        </select>
+    </div>
+    <div class="col-md-2 mb-3">
+        <label for="total_subjects" class="form-label">Total Subjects</label>
+        <input type="number" class="form-control" id="total_subjects" name="total_subjects" readonly>
+        <div class="form-text">Enrolled subjects</div>
+    </div>
+    <div class="col-md-2 mb-3">
+        <label for="units" class="form-label">Total Units</label>
+        <div class="input-group">
+            <input type="number" class="form-control" id="units" name="units" min="0" max="50" value="0" readonly>
+            <button type="button" class="btn btn-outline-secondary" onclick="recalcStudentUnits(document.getElementById('student_id').value)">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+        </div>
+        <div class="form-text">Total enrolled units</div>
+    </div>
+    <div class="col-md-2 mb-3">
+        <label for="unit_price_display" class="form-label">Unit Price</label>
+        <input type="text" class="form-control" id="unit_price_display" value="₱<?php echo number_format($global_unit_price, 2); ?>" readonly>
+        <div class="form-text">Per unit price</div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <label for="exam_amount" class="form-label">Exam Fee Amount</label>
+        <input type="number" class="form-control" id="exam_amount" name="exam_amount" readonly>
+        <div class="form-text">Units × Unit Price</div>
+    </div>
+</div>
 
             <div class="row">
                 <div class="col-md-4 mb-3">
@@ -1424,36 +1419,47 @@ function recalcStudentUnits(studentId) {
         return;
     }
     
+    document.getElementById('units').value = 'Loading...';
+    
     fetch(`ajax_handler.php?action=get_student_total_units&student_id=${encodeURIComponent(studentId)}`)
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                document.getElementById('units').value = data.total_units;
+                const totalUnits = data.total_units || 0;
+                const totalSubjects = data.total_subjects || 0;
+                
+                document.getElementById('units').value = totalUnits;
+                document.getElementById('total_subjects').value = totalSubjects;
                 calculateExamFee();
-                showToast(`Units recalculated: ${data.total_units} units`, 'success');
+                updateExamDescription();
+                showToast(`Updated: ${totalSubjects} subjects, ${totalUnits} units`, 'success');
             } else {
                 showToast('Error: ' + data.message, 'danger');
+                document.getElementById('units').value = '0';
+                document.getElementById('total_subjects').value = '0';
             }
         })
         .catch(error => {
-            console.error('Error:', error);
-            showToast('Failed to recalculate units', 'danger');
+            showToast('Failed to update units', 'danger');
+            document.getElementById('units').value = '0';
+            document.getElementById('total_subjects').value = '0';
         });
 }
 
 function calculateExamFee() {
     const units = parseInt(document.getElementById('units').value) || 0;
-    const unitPrice =<?php echo $global_unit_price; ?>;
+    const subjects = parseInt(document.getElementById('total_subjects').value) || 0;
+    const unitPrice = <?php echo $global_unit_price; ?>;
     const totalAmount = units * unitPrice;
     
     if (units > 0) {
-        document.getElementById('exam_amount').value = totalAmount;
-        document.getElementById('amount').value = totalAmount;
-        document.getElementById('amount_paid').value = totalAmount;
+        document.getElementById('exam_amount').value = totalAmount.toFixed(2);
+        document.getElementById('amount').value = totalAmount.toFixed(2);
+        document.getElementById('amount_paid').value = totalAmount.toFixed(2);
         calculateRemainingBalance();
         updateExamDescription();
     } else {
-        document.getElementById('exam_amount').value = 0;
+        document.getElementById('exam_amount').value = '0';
         document.getElementById('amount').value = '';
     }
 }
@@ -1462,7 +1468,6 @@ function calculateExamFee() {
 function handlePaymentTypeChange() {
     const paymentType = document.getElementById('payment_type').value;
     const unitsSection = document.getElementById('units_section');
-    const examTypeSelect = document.getElementById('exam_type');
     
     if (paymentType === 'exam') {
         unitsSection.style.display = 'flex';
@@ -1473,7 +1478,6 @@ function handlePaymentTypeChange() {
         }
     } else {
         unitsSection.style.display = 'none';
-        document.getElementById('units').value = '0';
         if (paymentType === 'tuition') {
             document.getElementById('description').value = 'Tuition Fee';
         } else if (paymentType === 'misc') {
@@ -1500,13 +1504,14 @@ function loadStudentSubjects(studentId) {
 
 function updateExamDescription() {
     const examType = document.getElementById('exam_type').value;
-    const subjectSelect = document.getElementById('exam_subject');
-    const selectedOption = subjectSelect.options[subjectSelect.selectedIndex];
-    const subjectCode = selectedOption.value ? selectedOption.text.split(' - ')[0] : '';
-    const subjectName = selectedOption.value ? selectedOption.text.split(' - ')[1]?.split(' (')[0] : '';
-    const units = selectedOption.dataset.units || 0;
+    const units = parseInt(document.getElementById('units').value) || 0;
+    const subjects = parseInt(document.getElementById('total_subjects').value) || 0;
+    const unitPrice = <?php echo $global_unit_price; ?>;
+    const amount = units * unitPrice;
     
-    document.getElementById('units').value = units;
+    document.getElementById('exam_amount').value = amount;
+    document.getElementById('amount').value = amount;
+    document.getElementById('amount_paid').value = amount;
     
     let examTypeName = '';
     switch(examType) {
@@ -1516,22 +1521,12 @@ function updateExamDescription() {
         case 'finals': examTypeName = 'Final'; break;
     }
     
-    const unitPrice = <?php echo $global_unit_price; ?>;
-    const amount = units * unitPrice;
-    document.getElementById('exam_amount').value = amount;
-    document.getElementById('amount').value = amount;
-    document.getElementById('amount_paid').value = amount;
-    
-    let description = `${examTypeName} Examination Fee`;
-    if (subjectCode) {
-        description += ` - ${subjectCode} ${subjectName} (${units} units)`;
-    }
+    let description = `${examTypeName} Examination Fee (${subjects} subjects, ${units} total units)`;
     document.getElementById('description').value = description;
     calculateRemainingBalance();
 }
 
 function loadStudentInfo(studentId) {
-    // Show loading state
     document.getElementById('student_info_section').style.display = 'block';
     document.getElementById('info_program').textContent = 'Loading...';
     document.getElementById('info_year_level').textContent = 'Loading...';
@@ -1539,40 +1534,42 @@ function loadStudentInfo(studentId) {
     document.getElementById('info_student_type').textContent = 'Loading...';
     document.getElementById('info_status').textContent = 'Loading...';
     
-    // Use consolidated AJAX handler
     fetch(`ajax_handler.php?action=get_student_info&student_id=${encodeURIComponent(studentId)}`)
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                const student = data.student;
-                document.getElementById('info_program').textContent = student.program || '-';
-                document.getElementById('info_year_level').textContent = student.year_level || '-';
-                document.getElementById('info_total_units').textContent = student.total_units || '0';
-                document.getElementById('info_student_type').textContent = student.student_type || '-';
+                const studentData = data.student;
+                
+                document.getElementById('info_program').textContent = studentData.program || '-';
+                document.getElementById('info_year_level').textContent = studentData.year_level || '-';
+                document.getElementById('info_total_units').textContent = studentData.total_units || '0';
+                document.getElementById('info_student_type').textContent = studentData.student_type || '-';
                 
                 const statusBadge = document.getElementById('info_status');
-                statusBadge.textContent = student.status || '-';
-                statusBadge.className = student.status === 'active' ? 'badge bg-success' : 'badge bg-danger';
+                statusBadge.textContent = studentData.status || '-';
+                statusBadge.className = studentData.status === 'active' ? 'badge bg-success' : 'badge bg-danger';
                 
-                // Auto-fill units for exam calculation
-                document.getElementById('units').value = student.total_units || 0;
+                const totalUnits = studentData.total_units || 0;
+                const totalSubjects = studentData.total_subjects || 0;
                 
-                // If exam payment type is selected, calculate fee
+                document.getElementById('units').value = totalUnits;
+                document.getElementById('total_subjects').value = totalSubjects;
+                
                 if (document.getElementById('payment_type').value === 'exam') {
                     calculateExamFee();
+                    updateExamDescription();
                 }
             } else {
                 document.getElementById('student_info_section').style.display = 'none';
-                console.error('Failed to load student info:', data.message);
                 alert('Error loading student information: ' + data.message);
             }
         })
         .catch(error => {
             document.getElementById('student_info_section').style.display = 'none';
-            console.error('Error loading student info:', error);
             alert('Failed to load student information. Please try again.');
         });
 }
+
 // Bulk payment type handling
 function handleBulkPaymentTypeChange() {
     const bulkPaymentType = document.getElementById('bulk_payment_type').value;
@@ -1821,6 +1818,34 @@ function deletePayment(paymentId, permitNumber, studentName, amount) {
 document.addEventListener('DOMContentLoaded', function() {
     handleBulkPaymentTypeChange();
 });
+
+function showToast(message, type = 'success') {
+    // Create a temporary toast notification
+    const toastContainer = document.createElement('div');
+    toastContainer.className = 'position-fixed bottom-0 end-0 p-3';
+    toastContainer.style.zIndex = '9999';
+    
+    const toastHtml = `
+        <div class="toast align-items-center text-white bg-${type === 'success' ? 'success' : 'danger'} border-0" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">
+                    ${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    
+    toastContainer.innerHTML = toastHtml;
+    document.body.appendChild(toastContainer);
+    
+    const toast = new bootstrap.Toast(toastContainer.querySelector('.toast'), { delay: 3000 });
+    toast.show();
+    
+    toastContainer.querySelector('.toast').addEventListener('hidden.bs.toast', () => {
+        toastContainer.remove();
+    });
+}
 </script>
 
 <?php renderPageEnd(); ?>

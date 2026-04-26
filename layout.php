@@ -85,7 +85,8 @@ function renderSidebar($role, $current_page = '') {
     $student_menu = [
         'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard'],
         'payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'My Payments'],
-        'schedule.php' => ['icon' => 'fas fa-calendar-alt', 'text' => 'My Schedule'],
+        'academic_progress.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Academic Progress'],
+        'schedule.php' => ['icon' => 'fas fa-calendar-alt', 'text' => 'Class Schedule'],
         'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile']
     ];
     
@@ -107,7 +108,20 @@ function renderSidebar($role, $current_page = '') {
             <ul class="nav flex-column">';
     
     foreach($menu as $page => $item) {
-        $active = ($current_page === $page) ? 'active bg-primary text-white' : '';
+        // Check if the current page matches or if we need to highlight
+        $active = '';
+        if ($current_page === $page) {
+            $active = 'active bg-primary text-white';
+        } elseif (($page === 'academic_progress.php') && ($current_page === 'schedule.php')) {
+            // Don't highlight schedule if we're on academic_progress
+            $active = '';
+        } elseif (($page === 'schedule.php') && ($current_page === 'academic_progress.php')) {
+            // Don't highlight schedule when on academic_progress
+            $active = '';
+        } elseif ($current_page === $page) {
+            $active = 'active bg-primary text-white';
+        }
+        
         $html .= '<li class="nav-item mb-1">
             <a class="nav-link ' . $active . ' rounded" href="' . $page . '">
                 <i class="' . $item['icon'] . ' me-2"></i>
@@ -299,123 +313,5 @@ function renderStatsCard($title, $value, $icon, $color = 'primary') {
         </div>
     </div>';
 }   
-// Add these helper functions to layout.php
 
-function renderCourseCard($course) {
-    $status_badge = $course['status'] === 'active' ? 'success' : 'secondary';
-    $status_text = ucfirst($course['status']);
-    
-    return '
-    <div class="card mb-3">
-        <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start">
-                <div>
-                    <h5 class="card-title mb-1">' . htmlspecialchars($course['course_code']) . ' - ' . htmlspecialchars($course['course_name']) . '</h5>
-                    <p class="card-text text-muted mb-2">' . htmlspecialchars($course['description']) . '</p>
-                    <div class="d-flex gap-2">
-                        <span class="badge bg-info">' . $course['duration_years'] . ' years</span>
-                        <span class="badge bg-secondary">' . $course['total_units'] . ' units</span>
-                        <span class="badge bg-' . $status_badge . '">' . $status_text . '</span>
-                    </div>
-                </div>
-                <div class="btn-group">
-                    <button class="btn btn-sm btn-outline-primary btn-edit-course" 
-                            data-id="' . $course['id'] . '"
-                            data-code="' . htmlspecialchars($course['course_code']) . '"
-                            data-name="' . htmlspecialchars($course['course_name']) . '"
-                            data-desc="' . htmlspecialchars($course['description']) . '"
-                            data-units="' . $course['total_units'] . '"
-                            data-years="' . $course['duration_years'] . '"
-                            data-status="' . $course['status'] . '">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                    <a href="manage_courses.php?tab=curriculum&course_id=' . $course['id'] . '" 
-                       class="btn btn-sm btn-outline-info">
-                        <i class="fas fa-book-open"></i>
-                    </a>
-                </div>
-            </div>
-        </div>
-    </div>';
-}
-
-function renderSubjectItem($subject, $showActions = true) {
-    $isAdjusted = isset($subject['is_adjusted']) && $subject['is_adjusted'];
-    
-    return '
-    <div class="card subject-item ' . ($isAdjusted ? 'adjusted' : '') . ' mb-2">
-        <div class="card-body py-2">
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <strong>' . htmlspecialchars($subject['subject_code']) . '</strong>
-                    <br>
-                    <small class="text-muted">' . htmlspecialchars($subject['subject_name']) . '</small>
-                    <br>
-                    <small>' . $subject['units'] . ' units</small>
-                    ' . (isset($subject['year_level']) ? '<span class="badge bg-info ms-2">Year ' . $subject['year_level'] . ' - ' . $subject['semester'] . '</span>' : '') . '
-                    ' . ($isAdjusted ? '<span class="badge bg-warning ms-2">Adjusted</span>' : '') . '
-                </div>';
-    
-    if ($showActions) {
-        echo '
-                <div class="btn-group btn-group-sm">
-                    <button class="btn btn-outline-primary btn-adjust-subject"
-                            data-subject-id="' . $subject['id'] . '"
-                            data-subject-name="' . htmlspecialchars($subject['subject_code'] . ' - ' . $subject['subject_name']) . '">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                </div>';
-    }
-    
-    echo '
-            </div>
-        </div>
-    </div>';
-}
-
-function renderStudentCourseInfo($student) {
-    if (!isset($student['course_name'])) {
-        return '<div class="alert alert-warning">No course assigned</div>';
-    }
-    
-    return '
-    <div class="alert alert-info">
-        <strong>Current Course:</strong> ' . htmlspecialchars($student['course_name']) . '<br>
-        <strong>Year Level:</strong> Year ' . $student['current_year_level'] . '<br>
-        <strong>Enrollment Date:</strong> ' . date('M d, Y', strtotime($student['enrollment_date'])) . '
-    </div>';
-}
-
-function renderCurriculumYear($year, $semesters) {
-    $html = '
-    <div class="card mb-4">
-        <div class="card-header bg-light">
-            <h5 class="mb-0">Year ' . $year . '</h5>
-        </div>
-        <div class="card-body">';
-    
-    foreach ($semesters as $semester => $subjects) {
-        $html .= '
-            <div class="mb-3">
-                <h6 class="text-muted">' . ucfirst($semester) . ' Semester</h6>
-                <div class="row">';
-        
-        foreach ($subjects as $subject) {
-            $html .= '
-                    <div class="col-md-6 mb-2">
-                        ' . renderSubjectItem($subject, false) . '
-                    </div>';
-        }
-        
-        $html .= '
-                </div>
-            </div>';
-    }
-    
-    $html .= '
-        </div>
-    </div>';
-    
-    return $html;
-}
 ?> 

@@ -51,29 +51,46 @@ foreach ($current_sections as $section) {
 
 // Calculate total units from unique subjects
 $total_units = array_sum(array_column($all_subjects, 'units'));
-
-// Build payment status for each exam type per subject (FIXED)
+// Build payment status for each exam type
 $payment_status = [];
+
+// First, get all exam payments for this student
+$stmt = $pdo->prepare("
+    SELECT description, payment_status, issued_date 
+    FROM payments 
+    WHERE student_id = ? 
+    AND payment_category = 'exam'
+    ORDER BY issued_date DESC
+");
+$stmt->execute([$user_id]);
+$exam_payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Determine which exam types are paid
+$paid_exams = [];
+foreach ($exam_payments as $payment) {
+    $desc = strtolower($payment['description']);
+    if (strpos($desc, 'prelim') !== false) {
+        $paid_exams['prelim'] = $payment['payment_status'];
+    }
+    if (strpos($desc, 'midterm') !== false) {
+        $paid_exams['midterm'] = $payment['payment_status'];
+    }
+    if (strpos($desc, 'prefinals') !== false) {
+        $paid_exams['prefinals'] = $payment['payment_status'];
+    }
+    if (strpos($desc, 'final') !== false) {
+        $paid_exams['finals'] = $payment['payment_status'];
+    }
+}
+
+// Apply to all subjects
 foreach ($all_subjects as $subject) {
     $subject_id = $subject['id'];
-    $subject_code = $subject['subject_code'];
-    
     foreach (['prelim', 'midterm', 'prefinals', 'finals'] as $exam_type) {
-        $stmt = $pdo->prepare("SELECT payment_status FROM payments 
-                               WHERE student_id = ? 
-                               AND payment_category = 'exam' 
-                               AND description LIKE ? 
-                               AND description LIKE ?
-                               ORDER BY issued_date DESC
-                               LIMIT 1");
-        $stmt->execute([$user_id, "%{$exam_type}%", "%{$subject_code}%"]);
-        $status = $stmt->fetchColumn();
-        
-        // FIX: Check if $status is false (no result) and set to 'unpaid'
-        if ($status === false) {
-            $payment_status[$subject_id][$exam_type] = 'unpaid';
+        if (isset($paid_exams[$exam_type]) && $paid_exams[$exam_type] === 'paid') {
+            $payment_status[$subject_id][$exam_type] = 'paid';
         } else {
-            $payment_status[$subject_id][$exam_type] = $status;
+            $payment_status[$subject_id][$exam_type] = 'unpaid';
         }
     }
 }

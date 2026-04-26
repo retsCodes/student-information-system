@@ -1,19 +1,34 @@
 <?php
-// Student Information System - Initialization File
+// init.php - Works on BOTH local XAMPP and Cloud
 session_start();
 
-// Database configuration
-define('DB_HOST', 'localhost');
-define('DB_USER', 'root');
-define('DB_PASS', '');
-define('DB_NAME', 'student_info_tracker');
+// Auto-detect environment
+$is_local = false;
 
-// Security configurations
-define('SESSION_TIMEOUT', 1800); // 30 minutes
-define('MAX_LOGIN_ATTEMPTS', 5);
-define('LOCKOUT_TIME', 900); // 15 minutes
+// Check if running on localhost
+if ($_SERVER['SERVER_NAME'] == 'localhost' || 
+    $_SERVER['SERVER_ADDR'] == '127.0.0.1' ||
+    strpos($_SERVER['SERVER_NAME'], '.local') !== false ||
+    strpos($_SERVER['DOCUMENT_ROOT'], 'xampp') !== false) {
+    $is_local = true;
+}
 
-// Database connection
+// Set database configuration based on environment
+if ($is_local) {
+    // Local XAMPP configuration
+    define('DB_HOST', 'localhost');
+    define('DB_USER', 'root');
+    define('DB_PASS', '');
+    define('DB_NAME', 'student_info_tracker');
+} else {
+    // Cloud InfinityFree configuration
+    define('DB_HOST', 'sql123.infinityfree.com');  // Your InfinityFree MySQL host
+    define('DB_USER', 'if0_41761335');              // Your database username
+    define('DB_PASS', 'YOUR_CLOUD_PASSWORD');       // Your database password
+    define('DB_NAME', 'if0_41761335_student_db');   // Your database name
+}
+
+// Database connection function
 function getDBConnection() {
     try {
         $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME, DB_USER, DB_PASS);
@@ -23,6 +38,7 @@ function getDBConnection() {
         die("Connection failed: " . $e->getMessage());
     }
 }
+
 
 // CSRF Token generation and validation
 function generateCSRFToken() {
