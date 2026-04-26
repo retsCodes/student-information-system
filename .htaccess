@@ -1,0 +1,31 @@
+# .htaccess - Place in /htdocs/students_information_system/
+
+# Disable hotlink protection for API
+RewriteEngine On
+
+# Allow direct access to mobile_api.php without protection
+<Files "mobile_api.php">
+    Order Allow,Deny
+    Allow from all
+    Satisfy Any
+</Files>
+
+# Disable mod_security for this folder (if enabled)
+<IfModule mod_security.c>
+    SecFilterEngine Off
+    SecFilterScanPOST Off
+</IfModule>
+
+# Set headers to allow API access
+<IfModule mod_headers.c>
+    Header set Access-Control-Allow-Origin "*"
+    Header set Access-Control-Allow-Methods "POST, GET, OPTIONS"
+    Header set Access-Control-Allow-Headers "Content-Type"
+</IfModule>
+
+# Allow API without User-Agent check
+SetEnvIf Request_URI "mobile_api\.php" allow
+Order allow,deny
+Allow from env=allow
+Allow from all
+Satisfy Any
