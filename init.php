@@ -24,7 +24,7 @@ if ($is_local) {
     // Cloud InfinityFree configuration
     define('DB_HOST', 'sql123.infinityfree.com');  // Your InfinityFree MySQL host
     define('DB_USER', 'if0_41761335');              // Your database username
-    define('DB_PASS', 'YOUR_CLOUD_PASSWORD');       // Your database password
+    define('DB_PASS', 'passtenword');       // Your database password
     define('DB_NAME', 'if0_41761335_student_db');   // Your database name
 }
 
@@ -38,6 +38,10 @@ function getDBConnection() {
         die("Connection failed: " . $e->getMessage());
     }
 }
+// Security configurations
+define('SESSION_TIMEOUT', 1800); // 30 minutes
+define('MAX_LOGIN_ATTEMPTS', 5);
+define('LOCKOUT_TIME', 900); // 15 minutes
 
 
 // CSRF Token generation and validation
