@@ -24,7 +24,7 @@ if ($is_local) {
     // Cloud InfinityFree configuration
     define('DB_HOST', 'sql309.infinityfree.com');  // Your InfinityFree MySQL host
     define('DB_USER', 'if0_41761335');              // Your database username
-    define('DB_PASS', 'passtenword');       // Your database password
+    define('DB_PASS', 'passthenword');       // Your database password
     define('DB_NAME', 'if0_41761335_student_db');   // Your database name
 }
 
