@@ -7,13 +7,29 @@ header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key');
+// mobile_api.php - Add this at the top after headers
 
-// Handle CORS preflight
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
+// Get request data from both JSON and form-data
+$input = [];
+
+// Check if it's JSON request
+$content_type = $_SERVER['CONTENT_TYPE'] ?? '';
+if (strpos($content_type, 'application/json') !== false) {
+    $json = file_get_contents('php://input');
+    $input = json_decode($json, true);
+} else {
+    // Regular form data
+    $input = $_POST;
 }
 
+// Also check GET parameters
+if (empty($input)) {
+    $input = $_GET;
+}
+
+$action = $input['action'] ?? '';
+
+// Rest of your API code...
 // Include initialization - but we won't use sessions
 require_once 'init.php';
 
@@ -38,6 +54,8 @@ try {
     }
     
     $pdo = getDBConnection();
+
+    
     
     switch ($action) {
         case 'login':
@@ -759,7 +777,7 @@ case 'get_full_schedule':
         ];
     }, $schedule);
     break;
-    
+
     }
     
 } catch (Exception $e) {
