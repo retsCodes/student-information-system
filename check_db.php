@@ -6,7 +6,7 @@ echo "<h1>Database Connection Test</h1>";
 $hosts_to_test = [
     'sql123.infinityfree.com',
     'sql1.infinityfree.com', 
-    'mysql.infinityfree.com',
+    'sql309.infinityfree.com',
     'localhost'
 ];
 
