@@ -73,52 +73,83 @@ function renderHeader($title, $user_name, $user_role) {
 function renderSidebar($role, $current_page = '') {
     $sidebar_theme = getSidebarTheme();
     
+    // Admin Menu - Full access
     $admin_menu = [
-        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard'],
-        'manage_users.php' => ['icon' => 'fas fa-users', 'text' => 'Manage Users'],
-        'manage_courses.php' => ['icon' => 'fas fa-book', 'text' => 'Course Management'],
-        'manage_payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'Manage Payments'],
-        'logs.php' => ['icon' => 'fas fa-history', 'text' => 'Activity Logs'],
-        'backup.php' => ['icon' => 'fas fa-database', 'text' => 'Backup System']
+        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard', 'roles' => ['admin']],
+        'manage_users.php' => ['icon' => 'fas fa-users', 'text' => 'Manage Users', 'roles' => ['admin']],
+        'manage_courses.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Course Management', 'roles' => ['admin', 'registrar']],
+        'manage_payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'Manage Payments', 'roles' => ['admin']],
+        'logs.php' => ['icon' => 'fas fa-history', 'text' => 'Activity Logs', 'roles' => ['admin', 'registrar']],
+        'backup.php' => ['icon' => 'fas fa-database', 'text' => 'Backup System', 'roles' => ['admin']]
     ];
     
+    // Registrar Menu - Only existing pages
+    $registrar_menu = [
+        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard', 'roles' => ['registrar']],
+        'manage_students.php' => ['icon' => 'fas fa-user-graduate', 'text' => 'Manage Students', 'roles' => ['admin', 'registrar']],
+        'manage_courses.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Manage Courses', 'roles' => ['admin', 'registrar']],
+        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile', 'roles' => ['admin', 'registrar', 'student', 'cashier']]
+    ];
+    
+    // Student Menu
     $student_menu = [
-        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard'],
-        'payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'My Payments'],
-        'academic_progress.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Academic Progress'],
-        'schedule.php' => ['icon' => 'fas fa-calendar-alt', 'text' => 'Class Schedule'],
-        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile']
+        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard', 'roles' => ['student']],
+        'payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'My Payments', 'roles' => ['student']],
+        'academic_progress.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Academic Progress', 'roles' => ['student']],
+        'schedule.php' => ['icon' => 'fas fa-calendar-alt', 'text' => 'Class Schedule', 'roles' => ['student']],
+        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile', 'roles' => ['student']]
     ];
     
+    // Cashier Menu
     $cashier_menu = [
-        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard'],
-        'payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'Manage Payments'],
-        'audit_log.php' => ['icon' => 'fas fa-clipboard-list', 'text' => 'Audit Log']
+        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard', 'roles' => ['cashier']],
+        'payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'Manage Payments', 'roles' => ['cashier']],
+        'audit_log.php' => ['icon' => 'fas fa-clipboard-list', 'text' => 'Audit Log', 'roles' => ['cashier']],
+        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile', 'roles' => ['cashier']]
     ];
     
+    // Merge menus based on role
     $menu = [];
+    
     switch($role) {
-        case 'admin': $menu = $admin_menu; break;
-        case 'student': $menu = $student_menu; break;
-        case 'cashier': $menu = $cashier_menu; break;
+        case 'admin':
+            // Admin gets all menus
+            $menu = array_merge($admin_menu, $registrar_menu, $student_menu, $cashier_menu);
+            break;
+        case 'registrar':
+            $menu = $registrar_menu;
+            break;
+        case 'student':
+            $menu = $student_menu;
+            break;
+        case 'cashier':
+            $menu = $cashier_menu;
+            break;
+        default:
+            $menu = [];
+            break;
+    }
+    
+    // Remove duplicates (in case same page appears in multiple menus)
+    $unique_menu = [];
+    foreach ($menu as $page => $item) {
+        if (!isset($unique_menu[$page])) {
+            $unique_menu[$page] = $item;
+        }
     }
     
     $html = '<nav class="sidebar ' . $sidebar_theme . '" style="width: 250px; height: calc(100vh - 56px); position: fixed; top: 56px; left: 0; overflow-y: auto; z-index: 1025;">
         <div class="p-3">
             <ul class="nav flex-column">';
     
-    foreach($menu as $page => $item) {
-        // Check if the current page matches or if we need to highlight
+    foreach($unique_menu as $page => $item) {
+        // Check if current user role is allowed to see this item
+        if (!in_array($role, $item['roles'])) {
+            continue;
+        }
+        
         $active = '';
         if ($current_page === $page) {
-            $active = 'active bg-primary text-white';
-        } elseif (($page === 'academic_progress.php') && ($current_page === 'schedule.php')) {
-            // Don't highlight schedule if we're on academic_progress
-            $active = '';
-        } elseif (($page === 'schedule.php') && ($current_page === 'academic_progress.php')) {
-            // Don't highlight schedule when on academic_progress
-            $active = '';
-        } elseif ($current_page === $page) {
             $active = 'active bg-primary text-white';
         }
         
@@ -297,6 +328,7 @@ function renderCard($title, $content, $footer = '', $class = '') {
         ' . ($footer ? '<div class="card-footer">' . $footer . '</div>' : '') . '
     </div>';
 }
+
 function renderStatsCard($title, $value, $icon, $color = 'primary') {
     return '
     <div class="card stats-card">
@@ -312,6 +344,5 @@ function renderStatsCard($title, $value, $icon, $color = 'primary') {
             </div>
         </div>
     </div>';
-}   
-
-?> 
+}
+?>

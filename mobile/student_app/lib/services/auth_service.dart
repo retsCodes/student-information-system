@@ -4,25 +4,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models.dart';
 
 class AuthService {
-  static const String _baseUrl = 'https://rets.free.nf/students_information_system/mobile_api.php';
+  // =======================================================
+  // FOR LOCAL XAMPP DEVELOPMENT (Android Emulator)
+  // =======================================================
+  // Android Emulator uses 10.0.2.2 to access host machine's localhost
+  static const String _baseUrl = 'http://10.0.2.2/students_information_system/mobile_api.php';
 
-  // Complete browser headers to bypass InfinityFree protection
-  static final Map<String, String> _headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Cache-Control': 'max-age=0',
-    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Upgrade-Insecure-Requests': '1',
-  };
+  // For local testing on physical device via USB, use your computer's IP:
+  // static const String _baseUrl = 'http://192.168.1.100/students_information_system/mobile_api.php';
+
+  // FOR PRODUCTION CLOUD (uncomment when deploying):
+  // static const String _baseUrl = 'https://rets.free.nf/students_information_system/mobile_api.php';
 
   static const String _tokenKey = 'auth_token';
   static const String _userKey = 'user_data';
@@ -35,19 +27,10 @@ class AuthService {
 
       final response = await http.get(
         Uri.parse('$_baseUrl?action=test'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 10));
 
       print('Response status: ${response.statusCode}');
-      print('Response preview: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}');
-
-      // Check if we got the challenge page
-      if (response.body.contains('aes.js') || response.body.contains('<html')) {
-        return {
-          'success': false,
-          'message': 'Server protection active. Please contact administrator to whitelist API endpoints.',
-        };
-      }
+      print('Response body: ${response.body}');
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -69,14 +52,11 @@ class AuthService {
   // Login
   Future<Map<String, dynamic>> login(String userId, String password) async {
     try {
-      print('Attempting login for: $userId');
+      print('Attempting login to: $_baseUrl');
+      print('User ID: $userId');
 
       final response = await http.post(
         Uri.parse(_baseUrl),
-        headers: {
-          ..._headers,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
         body: {
           'action': 'login',
           'user_id': userId,
@@ -85,14 +65,7 @@ class AuthService {
       ).timeout(const Duration(seconds: 15));
 
       print('Response status: ${response.statusCode}');
-
-      // Check for challenge page
-      if (response.body.contains('aes.js') || response.body.contains('<html')) {
-        return {
-          'success': false,
-          'message': 'Server protection active. Cannot login via app. Please use web browser.',
-        };
-      }
+      print('Response body: ${response.body}');
 
       final Map<String, dynamic> data = jsonDecode(response.body);
 
@@ -102,7 +75,7 @@ class AuthService {
         await prefs.setString(_userKey, jsonEncode(data['data']['user']));
         await prefs.setString(_userIdKey, userId);
 
-        print('✅ Login successful for: $userId');
+        print('✅ Login successful');
 
         return {
           'success': true,
@@ -169,28 +142,15 @@ class AuthService {
         };
       }
 
-      final body = {
-        'action': action,
-        'user_id': userId,
-        'token': token,
-        ...?extraData,
-      };
-
       final response = await http.post(
         Uri.parse(_baseUrl),
-        headers: {
-          ..._headers,
-          'Content-Type': 'application/x-www-form-urlencoded',
+        body: {
+          'action': action,
+          'user_id': userId,
+          'token': token,
+          ...?extraData,
         },
-        body: body,
       ).timeout(const Duration(seconds: 10));
-
-      if (response.body.contains('aes.js') || response.body.contains('<html')) {
-        return {
-          'success': false,
-          'message': 'Server protection active. Please refresh or try again later.',
-        };
-      }
 
       return jsonDecode(response.body);
     } catch (e) {

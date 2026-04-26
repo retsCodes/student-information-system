@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-// ==================== BASE MODELS ====================
+// ==================== BASE USER MODELS ====================
 
 class User {
   final String userId;
@@ -38,16 +38,12 @@ class User {
       email: json['email'] ?? '',
       role: json['role'] ?? 'student',
       program: json['program'],
-      yearLevel: json['year_level'] != null
-          ? int.tryParse(json['year_level'].toString())
-          : null,
+      yearLevel: json['year_level'] != null ? int.tryParse(json['year_level'].toString()) : null,
       enrollmentStatus: json['enrollment_status'] ?? 'enrolled',
       contactNumber: json['contact_number'] ?? json['number'],
       address: json['address'],
       studentType: json['student_type'] ?? 'regular',
-      totalUnits: json['total_units'] != null
-          ? int.tryParse(json['total_units'].toString())
-          : null,
+      totalUnits: json['total_units'] != null ? int.tryParse(json['total_units'].toString()) : null,
       enrollmentDate: json['enrollment_date'],
     );
   }
@@ -77,16 +73,12 @@ class StudentInfo {
   factory StudentInfo.fromJson(Map<String, dynamic> json) {
     return StudentInfo(
       program: json['program'],
-      yearLevel: json['year_level'] != null
-          ? int.tryParse(json['year_level'].toString())
-          : null,
+      yearLevel: json['year_level'] != null ? int.tryParse(json['year_level'].toString()) : null,
       enrollmentStatus: json['enrollment_status'] ?? 'enrolled',
       contactNumber: json['contact_number'] ?? json['number'],
       address: json['address'],
       studentType: json['student_type'] ?? 'regular',
-      totalUnits: json['total_units'] != null
-          ? int.tryParse(json['total_units'].toString())
-          : null,
+      totalUnits: json['total_units'] != null ? int.tryParse(json['total_units'].toString()) : null,
       enrollmentDate: json['enrollment_date'],
     );
   }
@@ -115,27 +107,13 @@ class PaymentStats {
 
   factory PaymentStats.fromJson(Map<String, dynamic> json) {
     return PaymentStats(
-      totalPayments: json['total_payments'] != null
-          ? int.tryParse(json['total_payments'].toString()) ?? 0
-          : 0,
-      unpaidCount: json['unpaid_count'] != null
-          ? int.tryParse(json['unpaid_count'].toString()) ?? 0
-          : 0,
-      paidCount: json['paid_count'] != null
-          ? int.tryParse(json['paid_count'].toString()) ?? 0
-          : 0,
-      partialCount: json['partial_count'] != null
-          ? int.tryParse(json['partial_count'].toString()) ?? 0
-          : 0,
-      totalDue: json['total_due'] != null
-          ? double.tryParse(json['total_due'].toString()) ?? 0.0
-          : 0.0,
-      totalPaid: json['total_paid'] != null
-          ? double.tryParse(json['total_paid'].toString()) ?? 0.0
-          : 0.0,
-      totalPartial: json['total_partial'] != null
-          ? double.tryParse(json['total_partial'].toString()) ?? 0.0
-          : 0.0,
+      totalPayments: json['total_payments'] != null ? int.tryParse(json['total_payments'].toString()) ?? 0 : 0,
+      unpaidCount: json['unpaid_count'] != null ? int.tryParse(json['unpaid_count'].toString()) ?? 0 : 0,
+      paidCount: json['paid_count'] != null ? int.tryParse(json['paid_count'].toString()) ?? 0 : 0,
+      partialCount: json['partial_count'] != null ? int.tryParse(json['partial_count'].toString()) ?? 0 : 0,
+      totalDue: json['total_due'] != null ? double.tryParse(json['total_due'].toString()) ?? 0.0 : 0.0,
+      totalPaid: json['total_paid'] != null ? double.tryParse(json['total_paid'].toString()) ?? 0.0 : 0.0,
+      totalPartial: json['total_partial'] != null ? double.tryParse(json['total_partial'].toString()) ?? 0.0 : 0.0,
     );
   }
 }
@@ -179,9 +157,7 @@ class Payment {
     return Payment(
       id: json['id']?.toString() ?? '',
       permitNumber: json['permit_number'] ?? '',
-      amount: json['amount'] != null
-          ? double.tryParse(json['amount'].toString()) ?? 0.0
-          : 0.0,
+      amount: json['amount'] != null ? double.tryParse(json['amount'].toString()) ?? 0.0 : 0.0,
       description: json['description'] ?? '',
       paymentStatus: json['payment_status'] ?? 'unpaid',
       issuedDate: _parseDate(json['issued_date'] ?? ''),
@@ -190,12 +166,8 @@ class Payment {
       issuedBy: json['issued_by'],
       paymentType: json['payment_type'] ?? 'regular',
       paymentCategory: json['payment_category'] ?? 'other',
-      units: json['units'] != null
-          ? int.tryParse(json['units'].toString())
-          : null,
-      remainingBalance: json['remaining_balance'] != null
-          ? double.tryParse(json['remaining_balance'].toString())
-          : null,
+      units: json['units'] != null ? int.tryParse(json['units'].toString()) : null,
+      remainingBalance: json['remaining_balance'] != null ? double.tryParse(json['remaining_balance'].toString()) : null,
       schoolYear: json['school_year'],
       amountText: json['amount_text'],
     );
@@ -204,9 +176,7 @@ class Payment {
   static DateTime _parseDate(dynamic date) {
     if (date == null) return DateTime.now();
     try {
-      if (date is String) {
-        return DateTime.parse(date);
-      }
+      if (date is String) return DateTime.parse(date);
       return DateTime.now();
     } catch (e) {
       return DateTime.now();
@@ -241,9 +211,7 @@ class Subject {
     return Subject(
       subjectCode: json['subject_code'] ?? '',
       subjectName: json['subject_name'] ?? '',
-      units: json['units'] != null
-          ? int.tryParse(json['units'].toString()) ?? 0
-          : 0,
+      units: json['units'] != null ? int.tryParse(json['units'].toString()) ?? 0 : 0,
       subjectDescription: json['subject_description'],
       sectionCode: json['section_code'],
       program: json['program'],
@@ -264,12 +232,8 @@ class AcademicSummary {
 
   factory AcademicSummary.fromJson(Map<String, dynamic> json) {
     return AcademicSummary(
-      totalSubjects: json['total_subjects'] != null
-          ? int.tryParse(json['total_subjects'].toString()) ?? 0
-          : 0,
-      totalUnits: json['total_units'] != null
-          ? int.tryParse(json['total_units'].toString()) ?? 0
-          : 0,
+      totalSubjects: json['total_subjects'] != null ? int.tryParse(json['total_subjects'].toString()) ?? 0 : 0,
+      totalUnits: json['total_units'] != null ? int.tryParse(json['total_units'].toString()) ?? 0 : 0,
     );
   }
 }
@@ -285,12 +249,8 @@ class BalanceSummary {
 
   factory BalanceSummary.fromJson(Map<String, dynamic> json) {
     return BalanceSummary(
-      totalUnpaid: json['total_unpaid'] != null
-          ? double.tryParse(json['total_unpaid'].toString()) ?? 0.0
-          : 0.0,
-      totalPartialPaid: json['total_partial_paid'] != null
-          ? double.tryParse(json['total_partial_paid'].toString()) ?? 0.0
-          : 0.0,
+      totalUnpaid: json['total_unpaid'] != null ? double.tryParse(json['total_unpaid'].toString()) ?? 0.0 : 0.0,
+      totalPartialPaid: json['total_partial_paid'] != null ? double.tryParse(json['total_partial_paid'].toString()) ?? 0.0 : 0.0,
     );
   }
 }
@@ -315,18 +275,13 @@ class AcademicProgress {
   factory AcademicProgress.fromJson(Map<String, dynamic> json) {
     List<CurriculumYear> curriculum = [];
     if (json['curriculum'] != null && json['curriculum'] is List) {
-      curriculum = (json['curriculum'] as List)
-          .map((item) => CurriculumYear.fromJson(item))
-          .toList();
+      curriculum = (json['curriculum'] as List).map((item) => CurriculumYear.fromJson(item)).toList();
     }
-
     return AcademicProgress(
       totalSubjects: json['total_subjects'] ?? 0,
       completedCount: json['completed_count'] ?? 0,
       inProgressCount: json['in_progress_count'] ?? 0,
-      averageGrade: json['avg_grade'] != null 
-          ? double.tryParse(json['avg_grade'].toString()) 
-          : null,
+      averageGrade: json['avg_grade'] != null ? double.tryParse(json['avg_grade'].toString()) : null,
       curriculum: curriculum,
     );
   }
@@ -346,11 +301,8 @@ class CurriculumYear {
   factory CurriculumYear.fromJson(Map<String, dynamic> json) {
     List<SemesterData> semesters = [];
     if (json['semesters'] != null && json['semesters'] is List) {
-      semesters = (json['semesters'] as List)
-          .map((item) => SemesterData.fromJson(item))
-          .toList();
+      semesters = (json['semesters'] as List).map((item) => SemesterData.fromJson(item)).toList();
     }
-
     return CurriculumYear(
       year: json['year'] ?? 0,
       status: json['status'] ?? 'upcoming',
@@ -373,11 +325,8 @@ class SemesterData {
   factory SemesterData.fromJson(Map<String, dynamic> json) {
     List<CurriculumSubject> subjects = [];
     if (json['subjects'] != null && json['subjects'] is List) {
-      subjects = (json['subjects'] as List)
-          .map((item) => CurriculumSubject.fromJson(item))
-          .toList();
+      subjects = (json['subjects'] as List).map((item) => CurriculumSubject.fromJson(item)).toList();
     }
-
     return SemesterData(
       semester: json['semester'] ?? '',
       totalUnits: json['total_units'] ?? 0,
@@ -526,7 +475,6 @@ class DashboardData {
   });
 
   factory DashboardData.fromJson(Map<String, dynamic> json) {
-    // Parse recent payments
     List<Payment> recentPayments = [];
     if (json['recent_payments'] != null && json['recent_payments'] is List) {
       recentPayments = (json['recent_payments'] as List)
@@ -534,7 +482,6 @@ class DashboardData {
           .toList();
     }
 
-    // Parse current subjects
     List<Subject> currentSubjects = [];
     if (json['current_subjects'] != null && json['current_subjects'] is List) {
       currentSubjects = (json['current_subjects'] as List)
@@ -542,7 +489,6 @@ class DashboardData {
           .toList();
     }
 
-    // Parse recent activities
     List<ActivityLog> recentActivities = [];
     if (json['recent_activities'] != null && json['recent_activities'] is List) {
       recentActivities = (json['recent_activities'] as List)

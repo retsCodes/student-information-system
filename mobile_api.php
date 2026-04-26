@@ -729,6 +729,38 @@ case 'get_academic_progress':
         'curriculum' => $years_data
     ];
     break;
+    case 'get_recent_activities':
+        $user_id = sanitizeInput($input['user_id'] ?? '');
+        $token = sanitizeInput($input['token'] ?? '');
+        
+        if (empty($user_id) || empty($token)) {
+            throw new Exception('Authentication required');
+        }
+        
+        // Verify token
+        $stmt = $pdo->prepare("SELECT * FROM mobile_tokens WHERE user_id = ? AND token = ? AND expires_at > NOW()");
+        $stmt->execute([$user_id, $token]);
+        $tokenData = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$tokenData) {
+            throw new Exception('Invalid or expired session');
+        }
+        
+        // Get recent activities
+        $stmt = $pdo->prepare("
+            SELECT al.*, u.name 
+            FROM activity_logs al 
+            JOIN users u ON al.user_id = u.user_id 
+            WHERE al.user_id = ? OR al.description LIKE ?
+            ORDER BY al.created_at DESC 
+            LIMIT 10
+        ");
+        $stmt->execute([$user_id, "%$user_id%"]);
+        $activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $response['success'] = true;
+        $response['data'] = $activities;
+        break;
 
 case 'get_full_schedule':
     $user_id = sanitizeInput($input['user_id'] ?? '');
