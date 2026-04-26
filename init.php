@@ -1,16 +1,25 @@
 <?php
-// init.php - Works on BOTH local XAMPP and Cloud
+// init.php - Simplified cloud detection
 session_start();
 
-// Auto-detect environment
-$is_local = false;
-
-// Check if running on localhost
-if ($_SERVER['SERVER_NAME'] == 'localhost' || 
-    $_SERVER['SERVER_ADDR'] == '127.0.0.1' ||
+// Check for local environment by looking at server name OR file path
+$is_local = (
+    $_SERVER['SERVER_NAME'] == 'localhost' || 
+    $_SERVER['SERVER_NAME'] == '127.0.0.1' ||
     strpos($_SERVER['SERVER_NAME'], '.local') !== false ||
-    strpos($_SERVER['DOCUMENT_ROOT'], 'xampp') !== false) {
-    $is_local = true;
+    strpos($_SERVER['DOCUMENT_ROOT'], 'xampp') !== false ||
+    strpos($_SERVER['SCRIPT_FILENAME'], 'xampp') !== false
+);
+
+// ALSO check if we're on InfinityFree by hostname
+$is_infinity = (
+    strpos($_SERVER['SERVER_NAME'], 'free.nf') !== false ||
+    strpos($_SERVER['SERVER_NAME'], 'infinityfree') !== false
+);
+
+// Force cloud mode if on InfinityFree
+if ($is_infinity) {
+    $is_local = false;
 }
 
 // Set database configuration based on environment
@@ -22,10 +31,10 @@ if ($is_local) {
     define('DB_NAME', 'student_info_tracker');
 } else {
     // Cloud InfinityFree configuration
-    define('DB_HOST', 'sql309.infinityfree.com');  // Your InfinityFree MySQL host
-    define('DB_USER', 'if0_41761335');              // Your database username
-    define('DB_PASS', 'passthenword');       // Your database password
-    define('DB_NAME', 'if0_41761335_student_db');   // Your database name
+    define('DB_HOST', 'sql309.infinityfree.com');
+    define('DB_USER', 'if0_41761335');
+    define('DB_PASS', 'passthenword');  // YOUR REAL PASSWORD
+    define('DB_NAME', 'if0_41761335_student_db');
 }
 
 // Database connection function
