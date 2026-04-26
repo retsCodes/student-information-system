@@ -1,44 +1,39 @@
 <?php
-// check_db.php - Check cloud database
-require_once 'init.php';
+// test_db_connection.php - Upload to your cloud
+echo "<h1>Database Connection Test</h1>";
 
-echo "<h1>Cloud Database Check</h1>";
+// Try different possible hostnames
+$hosts_to_test = [
+    'sql123.infinityfree.com',
+    'sql1.infinityfree.com', 
+    'mysql.infinityfree.com',
+    'localhost'
+];
 
-try {
-    $pdo = getDBConnection();
-    echo "✅ Database connected successfully!<br><br>";
-    
-    // Check users table
-    $stmt = $pdo->query("SELECT COUNT(*) FROM users");
-    $userCount = $stmt->fetchColumn();
-    echo "📊 Total users in cloud: $userCount<br>";
-    
-    // Check for student user
-    $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ?");
-    $stmt->execute(['C26-02-9927-MAN121']);
-    $student = $stmt->fetch();
-    
-    if ($student) {
-        echo "✅ Student user FOUND in cloud!<br>";
-        echo "Name: " . $student['name'] . "<br>";
-    } else {
-        echo "❌ Student user NOT FOUND in cloud!<br>";
-        echo "You need to import your local database to cloud.<br>";
-    }
-    
-    // Check password
-    if ($student) {
-        echo "<br>🔐 Password verification:<br>";
-        $testPassword = 'rets123';
-        if (verifyPassword($testPassword, $student['password'])) {
-            echo "✅ Password 'rets123' is CORRECT!<br>";
-        } else {
-            echo "❌ Password 'rets123' is WRONG!<br>";
-            echo "Hash in DB: " . $student['password'] . "<br>";
+$db_user = 'if0_41761335';  // Your database username
+$db_pass = 'passthenword';  // PUT YOUR REAL PASSWORD HERE
+$db_name = 'if0_41761335_student_db';
+
+foreach ($hosts_to_test as $host) {
+    echo "<h2>Testing: $host</h2>";
+    try {
+        $pdo = new PDO("mysql:host=$host;dbname=$db_name", $db_user, $db_pass);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        echo "✅ CONNECTION SUCCESSFUL!<br>";
+        
+        // Test query
+        $stmt = $pdo->query("SHOW TABLES");
+        $tables = $stmt->fetchAll();
+        echo "📊 Found " . count($tables) . " tables:<br>";
+        foreach ($tables as $table) {
+            echo "- " . $table[0] . "<br>";
         }
+        
+        echo "<strong style='color:green'>USE THIS HOST: $host</strong><br>";
+        break; // Stop testing once we find a working host
+        
+    } catch (PDOException $e) {
+        echo "❌ Failed: " . $e->getMessage() . "<br><br>";
     }
-    
-} catch (Exception $e) {
-    echo "❌ Error: " . $e->getMessage();
 }
 ?>
