@@ -1,0 +1,40 @@
+name: student_app
+description: Student Information System Mobile App
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.1.0
+  shared_preferences: ^2.2.2
+  connectivity_plus: ^4.0.2  # For network connectivity checks
+  flutter_secure_storage: ^9.0.0  # For secure storage
+  dio: ^5.3.2  # Advanced HTTP client
+  cached_network_image: ^3.3.0  # For caching images
+  flutter_dotenv: ^5.1.0  # For environment variables
+  intl: ^0.20.2  # For internationalization
+  flutter_localizations:
+    sdk: flutter
+  provider: ^6.1.1  # State management
+  network_info_plus: ^4.0.0  # For getting WiFi IP
+  firebase_core: ^2.24.0
+  firebase_auth: ^4.16.0
+  cloud_firestore: ^4.14.0
+  firebase_storage: ^11.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/images/logo.jpg
+    - .env
+
