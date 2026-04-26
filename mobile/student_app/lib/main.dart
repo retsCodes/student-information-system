@@ -1,18 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'services/auth_service.dart';
-import 'firebase_options.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize Firebase
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-
+void main() {
   runApp(const MyApp());
 }
 
@@ -52,14 +43,13 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _checkLoginStatus() async {
     await Future.delayed(const Duration(seconds: 1));
 
-    // Check Firebase auth instead of local storage
-    final user = FirebaseAuth.instance.currentUser;
+    final isLoggedIn = await _auth.isLoggedIn();
 
     if (mounted) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => user != null ? const DashboardScreen() : const LoginScreen(),
+          builder: (context) => isLoggedIn ? const DashboardScreen() : const LoginScreen(),
         ),
       );
     }
@@ -72,12 +62,23 @@ class _SplashScreenState extends State<SplashScreen> {
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.school, size: 80, color: Colors.blue),
-            const SizedBox(height: 20),
-            const CircularProgressIndicator(),
-            const SizedBox(height: 20),
-            const Text('Student Information System'),
+          children: const [
+            Icon(
+              Icons.school,
+              size: 80,
+              color: Colors.blue,
+            ),
+            SizedBox(height: 20),
+            CircularProgressIndicator(),
+            SizedBox(height: 20),
+            Text(
+              'Student Information System',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.blue,
+              ),
+            ),
           ],
         ),
       ),

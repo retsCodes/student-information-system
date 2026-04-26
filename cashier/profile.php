@@ -11,7 +11,7 @@ $error = '';
 $success = '';
 
 // Get current cashier information
-$stmt = $pdo->prepare("SELECT u.*, ei.role as employee_role, ei.number, ei.profile_picture 
+$stmt = $pdo->prepare("SELECT u.*, ei.number, ei.role as employee_role 
                        FROM users u 
                        LEFT JOIN employee_info ei ON u.user_id = ei.user_id 
                        WHERE u.user_id = ?");
@@ -91,10 +91,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $success = 'Profile updated successfully.';
                             
                             // Refresh cashier info
-                            $stmt = $pdo->prepare("SELECT u.*, ei.role as employee_role, ei.number, ei.profile_picture 
-                                                   FROM users u 
-                                                   LEFT JOIN employee_info ei ON u.user_id = ei.user_id 
-                                                   WHERE u.user_id = ?");
+                            $stmt = $pdo->prepare("SELECT u.*, ei.number, ei.role as employee_role 
+                       FROM users u 
+                       LEFT JOIN employee_info ei ON u.user_id = ei.user_id 
+                       WHERE u.user_id = ?");
                             $stmt->execute([$user_id]);
                             $cashier_info = $stmt->fetch(PDO::FETCH_ASSOC);
                         }
