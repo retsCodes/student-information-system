@@ -584,7 +584,7 @@ new bootstrap.Modal(document.getElementById('receiptModal')).show();
                         <tr><th>Date</th><th>Permit</th><th>Student</th><th>Amount</th><th>Status</th><th>Balance</th><th>Description</th><th>Actions</th></tr>
                     </thead>
                     <tbody>
-                        <?php foreach($payments as $payment): ?>
+                        <?php foreach($payments as $payment ): ?>
                         <tr>
                             <td><?php echo date('M j', strtotime($payment['issued_date'])); ?></td>
                             <td><code><?php echo htmlspecialchars($payment['permit_number']); ?></code></td>
@@ -610,7 +610,6 @@ new bootstrap.Modal(document.getElementById('receiptModal')).show();
 </div>
 
 <script>
-// Use admin's ajax_handler.php for API calls
 
 function filterStudents() {
     const search = document.getElementById('student_search').value.toLowerCase();

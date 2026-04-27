@@ -29,8 +29,6 @@ if (empty($input)) {
 
 $action = $input['action'] ?? '';
 
-// Rest of your API code...
-// Include initialization - but we won't use sessions
 require_once 'init.php';
 
 // DO NOT start session for API

@@ -1,8 +1,6 @@
 <?php
-// init.php - Simplified cloud detection
 session_start();
 
-// Check for local environment by looking at server name OR file path
 $is_local = (
     $_SERVER['SERVER_NAME'] == 'localhost' || 
     $_SERVER['SERVER_NAME'] == '127.0.0.1' ||
@@ -11,33 +9,27 @@ $is_local = (
     strpos($_SERVER['SCRIPT_FILENAME'], 'xampp') !== false
 );
 
-// ALSO check if we're on InfinityFree by hostname
 $is_infinity = (
     strpos($_SERVER['SERVER_NAME'], 'free.nf') !== false ||
     strpos($_SERVER['SERVER_NAME'], 'infinityfree') !== false
 );
 
-// Force cloud mode if on InfinityFree
 if ($is_infinity) {
     $is_local = false;
 }
 
-// Set database configuration based on environment
 if ($is_local) {
-    // Local XAMPP configuration
     define('DB_HOST', 'localhost');
     define('DB_USER', 'root');
     define('DB_PASS', '');
     define('DB_NAME', 'student_info_tracker');
 } else {
-    // Cloud InfinityFree configuration
     define('DB_HOST', 'sql309.infinityfree.com');
     define('DB_USER', 'if0_41761335');
-    define('DB_PASS', 'passthenword');  // YOUR REAL PASSWORD
+    define('DB_PASS', 'passthenword'); 
     define('DB_NAME', 'if0_41761335_student_db');
 }
 
-// Database connection function
 function getDBConnection() {
     try {
         $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME, DB_USER, DB_PASS);
@@ -47,13 +39,11 @@ function getDBConnection() {
         die("Connection failed: " . $e->getMessage());
     }
 }
-// Security configurations
 define('SESSION_TIMEOUT', 1800); // 30 minutes
 define('MAX_LOGIN_ATTEMPTS', 5);
 define('LOCKOUT_TIME', 900); // 15 minutes
 
 
-// CSRF Token generation and validation
 function generateCSRFToken() {
     if (!isset($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -65,22 +55,18 @@ function validateCSRFToken($token) {
     return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
 }
 
-// Session management
 function checkSession() {
     if (!isset($_SESSION['user_id'])) {
         return false;
     }
     
-    // Check session timeout
     if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > SESSION_TIMEOUT) {
-        // Log the timeout but don't try to log with the expired session user
         session_destroy();
         return false;
     }
     
     $_SESSION['last_activity'] = time();
     
-    // Update last active in database
     if (isset($_SESSION['user_id'])) {
         updateLastActive($_SESSION['user_id']);
     }
@@ -98,14 +84,12 @@ function requireAuth() {
 function requireRole($required_role) {
     requireAuth();
     if ($_SESSION['role'] !== $required_role) {
-        // Log the unauthorized access attempt
         logActivity($_SESSION['user_id'], 'Unauthorized Access', "Attempted to access restricted content requiring role: $required_role");
         header('Location: /students_information_system/unauthorized.php');
         exit();
     }
 }
 
-// Password hashing
 function hashPassword($password) {
     return password_hash($password, PASSWORD_DEFAULT);
 }
@@ -114,7 +98,6 @@ function verifyPassword($password, $hash) {
     return password_verify($password, $hash);
 }
 
-// Login attempts management
 function checkLoginAttempts($user_id, $ip_address) {
     $pdo = getDBConnection();
     $stmt = $pdo->prepare("SELECT attempts, locked_until FROM login_attempts WHERE (user_id = ? OR ip_address = ?) AND locked_until > NOW()");
@@ -122,7 +105,7 @@ function checkLoginAttempts($user_id, $ip_address) {
     $result = $stmt->fetch();
     
     if ($result && $result['attempts'] >= MAX_LOGIN_ATTEMPTS) {
-        return false; // Account is locked
+        return false;
     }
     return true;
 }
@@ -132,14 +115,11 @@ function recordLoginAttempt($user_id, $ip_address, $success = false) {
     
     try {
         if ($success) {
-            // Clear login attempts on successful login
             $stmt = $pdo->prepare("DELETE FROM login_attempts WHERE user_id = ? OR ip_address = ?");
             $stmt->execute([$user_id, $ip_address]);
             
-            // Log successful login
             logActivity($user_id, 'Login', 'User logged in successfully');
         } else {
-            // Record failed attempt
             $stmt = $pdo->prepare("SELECT id, attempts FROM login_attempts WHERE user_id = ? OR ip_address = ?");
             $stmt->execute([$user_id, $ip_address]);
             $existing = $stmt->fetch();
@@ -155,7 +135,6 @@ function recordLoginAttempt($user_id, $ip_address, $success = false) {
                 $stmt->execute([$user_id, $ip_address]);
             }
             
-            // Log failed login attempt
             logActivity($user_id ?? 'unknown', 'Failed Login', "Failed login attempt from IP: $ip_address");
         }
         return true;
@@ -164,34 +143,28 @@ function recordLoginAttempt($user_id, $ip_address, $success = false) {
         return false;
     }
 }
-// Activity logging
 function logActivity($user_id, $action, $description = '') {
     $pdo = getDBConnection();
     
     try {
-        // Check if user exists before logging
         $checkUser = $pdo->prepare("SELECT user_id FROM users WHERE user_id = ?");
         $checkUser->execute([$user_id]);
         
         $final_user_id = $user_id;
         
         if ($checkUser->rowCount() === 0) {
-            // User doesn't exist, use system user instead
             $systemUser = $pdo->query("SELECT user_id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")->fetch();
             if ($systemUser) {
                 $final_user_id = $systemUser['user_id'];
             } else {
-                // If no admin user exists, we can't log the activity
                 error_log("Cannot log activity: No valid user found for ID: $user_id");
                 return false;
             }
         }
         
-        // Generate unique log_id
         $log_id = 'LOG_' . time() . '_' . uniqid();
         $ip_address = $_SERVER['REMOTE_ADDR'] ?? '';
         
-        // Insert with all required fields
         $stmt = $pdo->prepare("INSERT INTO activity_logs (log_id, user_id, action, description, ip_address, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
         $result = $stmt->execute([$log_id, $final_user_id, $action, $description, $ip_address]);
         
@@ -201,13 +174,11 @@ function logActivity($user_id, $action, $description = '') {
         
         return $result;
     } catch(PDOException $e) {
-        // Log the error but don't break the application
         error_log("Activity logging failed: " . $e->getMessage());
         return false;
     }
 }
 
-// Utility functions
 function sanitizeInput($input) {
     return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
 }
@@ -263,7 +234,6 @@ function numberToWords($number) {
     return 'Number too large';
 }
 
-// Get user info
 function getUserInfo($user_id) {
     $pdo = getDBConnection();
     $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ?");
@@ -285,11 +255,6 @@ function getEmployeeInfo($user_id) {
     return $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
-// =======================================================
-// PROFILE PICTURE FUNCTIONS
-// =======================================================
-
-// Get user profile picture from users table
 function getUserProfilePicture($user_id) {
     $pdo = getDBConnection();
     $stmt = $pdo->prepare("SELECT profile_picture FROM users WHERE user_id = ?");
@@ -299,7 +264,6 @@ function getUserProfilePicture($user_id) {
     return $result ? $result['profile_picture'] : null;
 }
 
-// Load profile picture into session
 function loadProfilePictureIntoSession($user_id) {
     $profile_pic = getUserProfilePicture($user_id);
     if ($profile_pic) {
@@ -308,14 +272,12 @@ function loadProfilePictureIntoSession($user_id) {
     return $profile_pic;
 }
 
-// Update profile picture in database
 function saveProfilePictureToDatabase($user_id, $filename) {
     $pdo = getDBConnection();
     $stmt = $pdo->prepare("UPDATE users SET profile_picture = ? WHERE user_id = ?");
     return $stmt->execute([$filename, $user_id]);
 }
 
-// Delete old profile picture file
 function deleteOldProfilePicture($user_id) {
     $old_picture = getUserProfilePicture($user_id);
     if ($old_picture) {
@@ -327,23 +289,19 @@ function deleteOldProfilePicture($user_id) {
     return true;
 }
 
-// Update profile picture in session
 function updateProfilePictureInSession($filename) {
     $_SESSION['profile_picture'] = $filename;
     return true;
 }
 
-// Display profile picture with fallback
 function displayProfilePicture($size = 'md', $class = '') {
-    // Check if user is logged in
+
     if (!isset($_SESSION['user_id'])) {
         return '';
     }
     
-    // Get profile picture from session
     $profile_pic = $_SESSION['profile_picture'] ?? null;
     
-    // Size classes
     $size_classes = [
         'xs' => 'width: 24px; height: 24px; font-size: 12px;',
         'sm' => 'width: 32px; height: 32px; font-size: 14px;',
@@ -359,7 +317,6 @@ function displayProfilePicture($size = 'md', $class = '') {
                 class="rounded-circle ' . $class . '" 
                 style="' . $size_style . ' object-fit: cover;">';
     } else {
-        // Get user's name for initials
         $name = $_SESSION['name'] ?? '';
         $initial = $name ? strtoupper(substr($name, 0, 1)) : 'U';
         
@@ -370,18 +327,12 @@ function displayProfilePicture($size = 'md', $class = '') {
     }
 }
 
-// =======================================================
-// END PROFILE PICTURE FUNCTIONS
-// =======================================================
-
-// Update last active
 function updateLastActive($user_id) {
     $pdo = getDBConnection();
     $stmt = $pdo->prepare("UPDATE users SET last_active = NOW() WHERE user_id = ?");
     $stmt->execute([$user_id]);
 }
 
-// Error handling
 function showError($message) {
     echo "<div class='alert alert-danger'>" . sanitizeInput($message) . "</div>";
 }
@@ -390,22 +341,18 @@ function showSuccess($message) {
     echo "<div class='alert alert-success'>" . sanitizeInput($message) . "</div>";
 }
 
-// Redirect function
 function redirect($url) {
     header("Location: $url");
     exit();
 }
 
-// Initialize CSRF token if not exists
 if (!isset($_SESSION['csrf_token'])) {
     generateCSRFToken();
 }
 
-// Auto-check session for authenticated users
 if (isset($_SESSION['user_id'])) {
     checkSession();
     
-    // Load profile picture into session if not already loaded
     if (!isset($_SESSION['profile_picture'])) {
         loadProfilePictureIntoSession($_SESSION['user_id']);
     }

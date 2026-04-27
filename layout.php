@@ -1,20 +1,15 @@
 <?php
-// Shared Layout Functions
 function renderHeader($title, $user_name, $user_role) {
     $navbar_theme = getNavbarTheme();
     
-    // Get profile picture from session
     $profile_picture = $_SESSION['profile_picture'] ?? null;
     
-    // Generate avatar HTML based on whether profile picture exists
     $avatar_html = '';
     if ($profile_picture && !empty($profile_picture) && file_exists('../uploads/profile_pictures/' . $profile_picture)) {
-        // Show actual profile picture
         $avatar_html = '<img src="../uploads/profile_pictures/' . htmlspecialchars($profile_picture) . '" 
                         class="profile-picture-nav" 
                         alt="' . htmlspecialchars($user_name) . '">';
     } else {
-        // Show initials as fallback
         $avatar_html = '<div class="avatar-circle me-2">' . strtoupper(substr($user_name, 0, 1)) . '</div>';
     }
     
@@ -73,48 +68,54 @@ function renderHeader($title, $user_name, $user_role) {
 function renderSidebar($role, $current_page = '') {
     $sidebar_theme = getSidebarTheme();
     
-    // Admin Menu - Full access
+    // =======================================================
+    // ADMIN MENU - Full system access
+    // =======================================================
     $admin_menu = [
-        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard', 'roles' => ['admin']],
-        'manage_users.php' => ['icon' => 'fas fa-users', 'text' => 'Manage Users', 'roles' => ['admin']],
-        'manage_courses.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Course Management', 'roles' => ['admin', 'registrar']],
-        'manage_payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'Manage Payments', 'roles' => ['admin']],
-        'logs.php' => ['icon' => 'fas fa-history', 'text' => 'Activity Logs', 'roles' => ['admin', 'registrar']],
-        'backup.php' => ['icon' => 'fas fa-database', 'text' => 'Backup System', 'roles' => ['admin']]
+        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard'],
+        'manage_users.php' => ['icon' => 'fas fa-users', 'text' => 'Manage Users'],
+        'manage_courses.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Course Management'],
+        'manage_payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'Manage Payments'],
+        'logs.php' => ['icon' => 'fas fa-history', 'text' => 'Activity Logs'],
+        'backup.php' => ['icon' => 'fas fa-database', 'text' => 'Backup System'],
+        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile']
     ];
     
-    // Registrar Menu - Only existing pages
+    // =======================================================
+    // REGISTRAR MENU - Academic management only
+    // =======================================================
     $registrar_menu = [
-        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard', 'roles' => ['registrar']],
-        'manage_students.php' => ['icon' => 'fas fa-user-graduate', 'text' => 'Manage Students', 'roles' => ['admin', 'registrar']],
-        'manage_courses.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Manage Courses', 'roles' => ['admin', 'registrar']],
-        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile', 'roles' => ['admin', 'registrar', 'student', 'cashier']]
+        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard'],
+        'manage_students.php' => ['icon' => 'fas fa-user-graduate', 'text' => 'Manage Students'],
+        'manage_courses.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Manage Courses'],
+        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile']
     ];
     
-    // Student Menu
+    // =======================================================
+    // STUDENT MENU
+    // =======================================================
     $student_menu = [
-        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard', 'roles' => ['student']],
-        'payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'My Payments', 'roles' => ['student']],
-        'academic_progress.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Academic Progress', 'roles' => ['student']],
-        'schedule.php' => ['icon' => 'fas fa-calendar-alt', 'text' => 'Class Schedule', 'roles' => ['student']],
-        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile', 'roles' => ['student']]
+        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard'],
+        'payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'My Payments'],
+        'academic_progress.php' => ['icon' => 'fas fa-graduation-cap', 'text' => 'Academic Progress'],
+        'schedule.php' => ['icon' => 'fas fa-calendar-alt', 'text' => 'Class Schedule'],
+        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile']
     ];
     
-    // Cashier Menu
+    // =======================================================
+    // CASHIER MENU
+    // =======================================================
     $cashier_menu = [
-        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard', 'roles' => ['cashier']],
-        'payments.php' => ['icon' => 'fas fa-money-bill-wave', 'text' => 'Manage Payments', 'roles' => ['cashier']],
-        'audit_log.php' => ['icon' => 'fas fa-clipboard-list', 'text' => 'Audit Log', 'roles' => ['cashier']],
-        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile', 'roles' => ['cashier']]
+        'dashboard.php' => ['icon' => 'fas fa-tachometer-alt', 'text' => 'Dashboard'],
+        'payments.php' => ['icon' => 'fas fa-list', 'text' => 'Payment List'],
+        'audit_log.php' => ['icon' => 'fas fa-history', 'text' => 'Audit Logs'],
+        'profile.php' => ['icon' => 'fas fa-user', 'text' => 'My Profile']
     ];
     
-    // Merge menus based on role
-    $menu = [];
-    
+    // Select menu based on role
     switch($role) {
         case 'admin':
-            // Admin gets all menus
-            $menu = array_merge($admin_menu, $registrar_menu, $student_menu, $cashier_menu);
+            $menu = $admin_menu;
             break;
         case 'registrar':
             $menu = $registrar_menu;
@@ -130,24 +131,11 @@ function renderSidebar($role, $current_page = '') {
             break;
     }
     
-    // Remove duplicates (in case same page appears in multiple menus)
-    $unique_menu = [];
-    foreach ($menu as $page => $item) {
-        if (!isset($unique_menu[$page])) {
-            $unique_menu[$page] = $item;
-        }
-    }
-    
     $html = '<nav class="sidebar ' . $sidebar_theme . '" style="width: 250px; height: calc(100vh - 56px); position: fixed; top: 56px; left: 0; overflow-y: auto; z-index: 1025;">
         <div class="p-3">
             <ul class="nav flex-column">';
     
-    foreach($unique_menu as $page => $item) {
-        // Check if current user role is allowed to see this item
-        if (!in_array($role, $item['roles'])) {
-            continue;
-        }
-        
+    foreach($menu as $page => $item) {
         $active = '';
         if ($current_page === $page) {
             $active = 'active bg-primary text-white';
@@ -212,7 +200,6 @@ function renderPageStart($title, $role, $current_page = '') {
             border-radius: 0 0 5px 5px;
         }
         
-        /* STATS CARD STYLES - Unified for all pages */
         .stats-card-container {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -266,7 +253,6 @@ function renderPageStart($title, $role, $current_page = '') {
             max-width: 100%;
         }
 
-        /* Responsive adjustments for stats cards */
         @media (max-width: 1200px) {
             .stats-card-container {
                 grid-template-columns: repeat(2, 1fr);

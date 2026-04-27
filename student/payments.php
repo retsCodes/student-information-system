@@ -94,9 +94,6 @@ renderPageStart('My Payments', 'student', 'payments.php');
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>My Payments</h2>
-    <div class="text-muted">
-        Total: <?php echo $summary['total_count']; ?> payment(s)
-    </div>
 </div>
 
 <!-- Summary Cards - Only show if we have payments -->

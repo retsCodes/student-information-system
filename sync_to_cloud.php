@@ -1,6 +1,4 @@
 <?php
-// sync_to_cloud.php - Place in your local htdocs/students_information_system/
-// Run this whenever your computer connects to WiFi
 
 require_once 'init.php';
 

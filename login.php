@@ -10,7 +10,6 @@ $errors = [
 $user_id = '';
 $password = '';
 
-// Redirect if already logged in
 if (checkSession()) {
     $role = $_SESSION['role'] ?? '';
     
@@ -248,7 +247,7 @@ autoSyncToCloud();
                         
                         <div class="text-center mt-4">
                             <small class="text-muted d-block">
-                                Student Login: 	C26-02-9927-MAN121 / rets123
+                                Student Login: 	c2026-02-7939-MAN121 / student123
                             </small>
                             <small class="text-muted d-block">
                                 Cashier Login: CASH001 / password

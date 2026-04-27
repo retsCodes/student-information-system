@@ -36,7 +36,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       if (result['success'] == true) {
         setState(() {
           _schedule = (result['data'] as List)
-              .map((item) => ClassSchedule.fromJson(item))
+              .map((item) => ClassSchedule.fromJson(item as Map<String, dynamic>))
               .toList();
         });
       } else {
@@ -55,47 +55,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     return _schedule.where((c) => c.dayOfWeek == _selectedDay).toList();
   }
 
-  // Helper to parse time strings
-  DateTime _parseTime(String timeString) {
+  String _formatTime(String time) {
     try {
-      if (timeString.contains(' ')) {
-        // Format like "8:00 AM"
-        final parts = timeString.split(' ');
-        final timeParts = parts[0].split(':');
-        int hour = int.parse(timeParts[0]);
-        final minute = int.parse(timeParts[1]);
-        final isPM = parts[1].toUpperCase() == 'PM';
-        if (isPM && hour != 12) hour += 12;
-        if (!isPM && hour == 12) hour = 0;
-        return DateTime(2025, 1, 1, hour, minute);
-      } else {
-        // Format like "08:00:00"
-        final parts = timeString.split(':');
-        final hour = int.parse(parts[0]);
-        final minute = int.parse(parts[1]);
-        return DateTime(2025, 1, 1, hour, minute);
-      }
+      if (time.contains(' ')) return time;
+      final parts = time.split(':');
+      int hour = int.parse(parts[0]);
+      final minute = parts[1];
+      final period = hour >= 12 ? 'PM' : 'AM';
+      if (hour > 12) hour -= 12;
+      if (hour == 0) hour = 12;
+      return '$hour:$minute $period';
     } catch (e) {
-      return DateTime(2025, 1, 1, 0, 0);
+      return time;
     }
-  }
-
-  // Determine if class is ongoing or upcoming
-  String _getClassStatus(String startTime, String endTime) {
-    final now = DateTime.now();
-    final currentTime = TimeOfDay.now();
-    final start = _parseTime(startTime);
-    final end = _parseTime(endTime);
-    final currentMinutes = currentTime.hour * 60 + currentTime.minute;
-    final startMinutes = start.hour * 60 + start.minute;
-    final endMinutes = end.hour * 60 + end.minute;
-
-    if (currentMinutes >= startMinutes && currentMinutes <= endMinutes) {
-      return 'ongoing';
-    } else if (currentMinutes < startMinutes && (startMinutes - currentMinutes) <= 60) {
-      return 'upcoming';
-    }
-    return 'normal';
   }
 
   @override
@@ -229,123 +201,99 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
     // Sort classes by start time
     final sortedClasses = List.of(_filteredSchedule);
-    sortedClasses.sort((a, b) {
-      final timeA = _parseTime(a.startTime);
-      final timeB = _parseTime(b.startTime);
-      return timeA.compareTo(timeB);
-    });
+    sortedClasses.sort((a, b) => a.startTime.compareTo(b.startTime));
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: sortedClasses.length,
       itemBuilder: (context, index) {
         final classItem = sortedClasses[index];
-        final status = _getClassStatus(classItem.startTime, classItem.endTime);
-        return _buildClassCard(classItem, status);
+        return _buildClassCard(classItem);
       },
     );
   }
 
-  Widget _buildClassCard(ClassSchedule classItem, String status) {
-    Color statusColor;
-    String statusText;
-    switch (status) {
-      case 'ongoing':
-        statusColor = Colors.green;
-        statusText = 'ONGOING';
-        break;
-      case 'upcoming':
-        statusColor = Colors.orange;
-        statusText = 'UPCOMING';
-        break;
-      default:
-        statusColor = Colors.grey;
-        statusText = '';
-    }
-
+  Widget _buildClassCard(ClassSchedule classItem) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: status == 'ongoing' ? Border.all(color: Colors.green, width: 2) : null,
-        ),
-        child: Column(
-          children: [
-            // Time and status bar
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: status == 'ongoing'
-                    ? Colors.green.shade50
-                    : status == 'upcoming'
-                        ? Colors.orange.shade50
-                        : Colors.grey.shade50,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12),
-                  topRight: Radius.circular(12),
+      child: Column(
+        children: [
+          // Time bar
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(12),
+                topRight: Radius.circular(12),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.access_time, size: 16, color: Colors.blue.shade700),
+                const SizedBox(width: 8),
+                Text(
+                  '${_formatTime(classItem.startTime)} - ${_formatTime(classItem.endTime)}',
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade700),
                 ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.access_time, size: 16, color: statusColor),
-                      const SizedBox(width: 8),
-                      Text(
-                        classItem.getTimeRange(),
-                        style: TextStyle(fontWeight: FontWeight.bold, color: statusColor),
-                      ),
-                    ],
-                  ),
-                  if (statusText.isNotEmpty)
+              ],
+            ),
+          ),
+          // Class details
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  classItem.subjectName,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(12)),
-                      child: Text(statusText, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        classItem.subjectCode,
+                        style: TextStyle(color: Colors.blue.shade700, fontWeight: FontWeight.w500, fontSize: 12),
+                      ),
                     ),
-                ],
-              ),
-            ),
-            // Class details
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(classItem.subjectName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
-                        child: Text(classItem.subjectCode, style: TextStyle(color: Colors.blue.shade700, fontWeight: FontWeight.w500, fontSize: 12)),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.purple.shade50,
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(8)),
-                        child: Text(classItem.sectionCode, style: TextStyle(color: Colors.purple.shade700, fontWeight: FontWeight.w500, fontSize: 12)),
+                      child: Text(
+                        classItem.sectionCode,
+                        style: TextStyle(color: Colors.purple.shade700, fontWeight: FontWeight.w500, fontSize: 12),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Icon(Icons.location_on, size: 14, color: Colors.grey.shade600),
-                      const SizedBox(width: 4),
-                      Text(classItem.room ?? 'Room TBA', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                    ],
-                  ),
-                ],
-              ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(Icons.location_on, size: 14, color: Colors.grey.shade600),
+                    const SizedBox(width: 4),
+                    Text(
+                      classItem.room ?? 'Room TBA',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

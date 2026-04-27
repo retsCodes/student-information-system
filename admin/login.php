@@ -188,7 +188,7 @@ else if (empty($password)) {
                         
                         <div class="text-center mt-4">
                             <small class="text-muted">
-                                Default Admin: ADMIN001 / admin123
+                                Default Admin: ADMIN001 / password
                             </small>
                         </div>
                     </div>

@@ -451,17 +451,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
-          TextButton(
-            onPressed: () => _navigateTo('payments'),
-            style: TextButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: const Text('Pay', style: TextStyle(fontSize: 12)),
-          ),
         ],
       ),
     );
