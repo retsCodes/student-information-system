@@ -1,5 +1,5 @@
 <?php
-require_once 'init.php';
+require_once 'students_information_system/init.php';
 
 if (checkSession()) {
     $role = $_SESSION['role'];
