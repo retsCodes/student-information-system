@@ -2,6 +2,7 @@
 /**
  * generate_students.php
  * Generates realistic Filipino student data with grades in student_course_completion table
+ * Run this after resetting the database
  */
 
 require_once '../init.php';
@@ -37,14 +38,14 @@ foreach ($first_names as $first) {
 shuffle($full_names);
 
 $courses = [
-    'BSIT' => 'Bachelor of Science in Information Technology',
-    'BSCS' => 'Bachelor of Science in Computer Science',
-    'BSBA' => 'Bachelor of Science in Business Administration',
-    'BSA'  => 'Bachelor of Science in Accountancy'
+    'BSIT' => 'BS Information Technology',
+    'BSCS' => 'BS Computer Science',
+    'BSBA' => 'BS Business Administration',
+    'BSA'  => 'BS Accountancy'
 ];
 
 $course_ids = [];
-foreach ($courses as $code => $name) {
+foreach ($courses as $code => $program_name) {
     $stmt = $pdo->prepare("SELECT id FROM courses WHERE course_code = ?");
     $stmt->execute([$code]);
     $course_ids[$code] = $stmt->fetchColumn();
@@ -53,13 +54,166 @@ foreach ($courses as $code => $name) {
     }
 }
 
+// Map program names to consistent format
+$program_map = [
+    'BS Information Technology' => 'BS Information Technology',
+    'BS Computer Science' => 'BS Computer Science',
+    'BS Business Administration' => 'BS Business Administration',
+    'BS Accountancy' => 'BS Accountancy'
+];
+
+// =======================================================
+// CREATE FIXED BSCS YEAR 1 SECTION WITH SPECIFIC STUDENTS
+// =======================================================
+
+echo "<h3>Creating BSCS Year 1 Section and Fixed Students...</h3>";
+
+// Check if BSCS1A section exists, if not create it
+$stmt = $pdo->prepare("SELECT id FROM sections WHERE section_code = 'BSCS1A'");
+$stmt->execute();
+$bscs_section = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$bscs_section) {
+    $stmt = $pdo->prepare("
+        INSERT INTO sections (section_code, section_name, program, course_id, year_level, semester, status) 
+        VALUES ('BSCS1A', 'BSCS 1 - Section A', 'BS Computer Science', ?, 1, '1st', 'active')
+    ");
+    $stmt->execute([$course_ids['BSCS']]);
+    $bscs_section_id = $pdo->lastInsertId();
+    echo "✓ Created BSCS1A section<br>";
+} else {
+    $bscs_section_id = $bscs_section['id'];
+    echo "✓ BSCS1A section already exists<br>";
+}
+
+// Get BSCS course ID
+$bscs_course_id = $course_ids['BSCS'];
+
+// Fixed students for BSCS Year 1
+$fixed_students = [
+    ['user_id' => 'C24-02-0001-MAN121', 'name' => 'Juan Dela Cruz', 'email' => 'juan.delacruz@student.aclc.edu.ph'],
+    ['user_id' => 'C24-02-0002-MAN121', 'name' => 'Maria Santos', 'email' => 'maria.santos@student.aclc.edu.ph'],
+    ['user_id' => 'C24-02-0003-MAN121', 'name' => 'Jose Reyes', 'email' => 'jose.reyes@student.aclc.edu.ph'],
+    ['user_id' => 'C24-02-0004-MAN121', 'name' => 'Ana Gonzales', 'email' => 'ana.gonzales@student.aclc.edu.ph'],
+    ['user_id' => 'C24-02-0005-MAN121', 'name' => 'Carlos Mendoza', 'email' => 'carlos.mendoza@student.aclc.edu.ph']
+];
+
+$password_hash = password_hash('student123', PASSWORD_DEFAULT);
+$enrollment_date = date('Y-m-d');
+
+foreach ($fixed_students as $student) {
+    // Check if user exists
+    $stmt = $pdo->prepare("SELECT user_id FROM users WHERE user_id = ?");
+    $stmt->execute([$student['user_id']]);
+    
+    if (!$stmt->fetch()) {
+        // Create user
+        $stmt = $pdo->prepare("
+            INSERT INTO users (user_id, name, email, password, role, user_status, created_at) 
+            VALUES (?, ?, ?, ?, 'student', 'active', NOW())
+        ");
+        $stmt->execute([$student['user_id'], $student['name'], $student['email'], $password_hash]);
+        echo "✓ Created user: {$student['name']} ({$student['user_id']})<br>";
+        
+        // Create student info
+        $stmt = $pdo->prepare("
+            INSERT INTO students_info 
+            (user_id, student_type, name, email, program, course_id, year_level, student_status, enrollment_status, status, enrollment_date, total_units, created_at)
+            VALUES (?, 'regular', ?, ?, 'BS Computer Science', ?, 1, 'new', 'enrolled', 'active', ?, 0, NOW())
+        ");
+        $stmt->execute([$student['user_id'], $student['name'], $student['email'], $bscs_course_id, $enrollment_date]);
+        echo "✓ Created student info: {$student['name']}<br>";
+        
+        // Create enrollment record
+        $expected_graduation = date('Y-m-d', strtotime('+4 years'));
+        $stmt = $pdo->prepare("
+            INSERT INTO student_course_enrollment 
+            (student_id, course_id, enrollment_date, expected_graduation, current_year_level, current_semester, status, created_at)
+            VALUES (?, ?, ?, ?, 1, '1st', 'active', NOW())
+        ");
+        $stmt->execute([$student['user_id'], $bscs_course_id, $enrollment_date, $expected_graduation]);
+    }
+    
+    // Assign student to section
+    $stmt = $pdo->prepare("
+        SELECT id FROM student_sections WHERE student_id = ? AND section_id = ?
+    ");
+    $stmt->execute([$student['user_id'], $bscs_section_id]);
+    if (!$stmt->fetch()) {
+        $stmt = $pdo->prepare("INSERT INTO student_sections (student_id, section_id, assigned_at) VALUES (?, ?, NOW())");
+        $stmt->execute([$student['user_id'], $bscs_section_id]);
+        echo "✓ Assigned {$student['name']} to BSCS1A section<br>";
+    }
+}
+
+echo "<hr>";
+
+// =======================================================
+// ENSURE SUBJECT_SECTIONS ARE POPULATED
+// =======================================================
+
+echo "<h3>Ensuring subject_sections are populated...</h3>";
+
+// Check if subject_sections is empty
+$stmt = $pdo->query("SELECT COUNT(*) FROM subject_sections");
+$subject_sections_count = $stmt->fetchColumn();
+
+if ($subject_sections_count == 0) {
+    echo "Populating subject_sections from curriculum...<br>";
+    
+    // Get all sections
+    $sections = $pdo->query("SELECT id, course_id, year_level, semester FROM sections WHERE status = 'active'")->fetchAll(PDO::FETCH_ASSOC);
+    
+    foreach ($sections as $section) {
+        if ($section['course_id']) {
+            // Get subjects from curriculum for this section's course, year level, and semester
+            $stmt = $pdo->prepare("
+                SELECT subject_id FROM course_curriculum 
+                WHERE course_id = ? AND year_level = ? AND semester = ?
+            ");
+            $stmt->execute([$section['course_id'], $section['year_level'], $section['semester']]);
+            $subjects = $stmt->fetchAll(PDO::FETCH_COLUMN);
+            
+            foreach ($subjects as $subject_id) {
+                $stmt = $pdo->prepare("INSERT IGNORE INTO subject_sections (subject_id, section_id, is_auto_filled) VALUES (?, ?, 1)");
+                $stmt->execute([$subject_id, $section['id']]);
+            }
+            echo "✓ Added " . count($subjects) . " subjects to section {$section['id']}<br>";
+        }
+    }
+} else {
+    echo "subject_sections already has $subject_sections_count records<br>";
+}
+
+echo "<hr>";
+
+// =======================================================
+// GET SECTIONS MAPPING (Using consistent program names)
+// =======================================================
+
 $sections_by_program_year = [];
 $stmt = $pdo->query("SELECT id, section_code, program, year_level FROM sections WHERE status = 'active'");
 while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+    // Use the program name as is from sections table
     $sections_by_program_year[$row['program']][$row['year_level']][] = $row['id'];
 }
 
-// Pre‑compute curriculum subjects
+// Debug: Show available sections
+echo "<h4>Available Sections for Assignment:</h4>";
+foreach ($sections_by_program_year as $program => $years) {
+    echo "<strong>$program:</strong> ";
+    foreach ($years as $year => $section_ids) {
+        echo "Year $year: " . count($section_ids) . " sections, ";
+    }
+    echo "<br>";
+}
+
+echo "<hr>";
+
+// =======================================================
+// PRE-COMPUTE CURRICULUM SUBJECTS
+// =======================================================
+
 $curriculum_cache = [];
 foreach ($course_ids as $code => $cid) {
     for ($year = 1; $year <= 4; $year++) {
@@ -82,7 +236,10 @@ foreach ($course_ids as $code => $cid) {
     }
 }
 
-// Get all subjects for the entire curriculum (for irregular assignments)
+// =======================================================
+// GET ALL SUBJECTS FOR IRREGULAR ASSIGNMENTS
+// =======================================================
+
 $all_subjects_by_program = [];
 foreach ($courses as $code => $program_name) {
     $stmt = $pdo->prepare("
@@ -96,16 +253,28 @@ foreach ($courses as $code => $program_name) {
     $all_subjects_by_program[$code] = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+// =======================================================
+// GENERATE STUDENTS FOR EACH COURSE
+// =======================================================
+
 $password_hash = password_hash('student123', PASSWORD_DEFAULT);
 $generated = 0;
 $name_index = 0;
 $irregular_count = 0;
+
+echo "<h3>Generating random students...</h3>";
 
 $pdo->beginTransaction();
 
 try {
     foreach ($courses as $code => $program_name) {
         $course_id = $course_ids[$code];
+        
+        // Skip BSCS fixed students - we already added them
+        if ($code == 'BSCS') {
+            echo "Skipping BSCS random students (fixed students already added)<br>";
+            continue;
+        }
         
         for ($i = 0; $i < $students_per_course; $i++) {
             if ($name_index >= count($full_names)) {
@@ -129,7 +298,8 @@ try {
             $sce_status = 'active';
             $current_year_level = $year_level;
             
-            $course_num = ($code == 'BSIT') ? '01' : (($code == 'BSCS') ? '02' : (($code == 'BSBA') ? '03' : '04'));
+            // Generate student ID
+            $course_num = ($code == 'BSIT') ? '01' : (($code == 'BSBA') ? '03' : '04');
             $random_num = str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
             $user_id = "c{$enroll_year}-{$course_num}-{$random_num}-MAN121";
             $stmt = $pdo->prepare("SELECT 1 FROM users WHERE user_id = ?");
@@ -138,6 +308,7 @@ try {
                 $user_id = "c{$enroll_year}-{$course_num}-{$random_num}-MAN121";
             }
             
+            // Generate email
             $email = strtolower(str_replace(' ', '.', $name)) . "@student.aclc.edu.ph";
             $orig_email = $email;
             $email_counter = 1;
@@ -147,27 +318,40 @@ try {
                 $email_counter++;
             }
             
+            // Insert user
             $stmt = $pdo->prepare("INSERT INTO users (user_id, name, email, password, role, user_status, created_at) 
                                    VALUES (?, ?, ?, ?, 'student', ?, ?)");
             $stmt->execute([$user_id, $name, $email, $password_hash, $user_status, $enrollment_date]);
             
+            // Generate address and phone
             $address = "Blk " . rand(1,50) . " Lot " . rand(1,20) . ", " . 
                        ['Mabini','Rizal','Bonifacio','Luna','Aguinaldo'][array_rand(['Mabini','Rizal','Bonifacio','Luna','Aguinaldo'])] . 
                        " St., " . ['Manila','Quezon City','Makati','Pasig','Cebu','Davao'][array_rand(['Manila','Quezon City','Makati','Pasig','Cebu','Davao'])];
             $phone = '0917' . str_pad(rand(0,9999999), 7, '0', STR_PAD_LEFT);
             $student_status = ($enroll_year == $current_year) ? 'new' : 'old';
             
+            // Insert student info - Use the SAME program name format as sections
             $stmt = $pdo->prepare("INSERT INTO students_info (user_id, student_type, name, email, number, address, program, course_id, year_level, student_status, enrollment_status, status, enrollment_date, total_units, created_at)
                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW())");
             $stmt->execute([$user_id, $student_type, $name, $email, $phone, $address, $program_name, $course_id, $year_level, $student_status, $enrollment_status, $user_status, $enrollment_date]);
             
+            // Create enrollment record
             $current_semester = (rand(1,100) <= 50) ? '1st' : '2nd';
             $stmt = $pdo->prepare("INSERT INTO student_course_enrollment (student_id, course_id, enrollment_date, expected_graduation, current_year_level, current_semester, status, created_at)
                                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW())");
             $stmt->execute([$user_id, $course_id, $enrollment_date, $expected_graduation, $current_year_level, $current_semester, $sce_status]);
             
-            // Get available sections for this student's program and year level
+            // Assign sections - Use the consistent program name
             $available_sections = $sections_by_program_year[$program_name][$year_level] ?? [];
+            
+            // If no sections found by program name, try alternative matching
+            if (empty($available_sections)) {
+                // Try to find sections by course_id
+                $stmt = $pdo->prepare("SELECT id FROM sections WHERE course_id = ? AND year_level = ? AND status = 'active'");
+                $stmt->execute([$course_id, $year_level]);
+                $available_sections = $stmt->fetchAll(PDO::FETCH_COLUMN);
+            }
+            
             $section_ids_to_assign = [];
             
             if ($is_irregular && count($available_sections) >= 2) {
@@ -179,7 +363,10 @@ try {
                 $section_ids_to_assign = [$available_sections[array_rand($available_sections)]];
             }
             
-            // Track all subjects the student is taking (from sections + direct assignments)
+            if (empty($section_ids_to_assign)) {
+                echo "Warning: No sections found for {$program_name} Year {$year_level}<br>";
+            }
+            
             $student_subject_ids = [];
             
             foreach ($section_ids_to_assign as $section_id) {
@@ -187,16 +374,14 @@ try {
                 $stmt->execute([$user_id, $section_id, $enrollment_date]);
                 
                 // Get subjects from this section
-                $stmt = $pdo->prepare("
-                    SELECT subject_id FROM subject_sections WHERE section_id = ?
-                ");
+                $stmt = $pdo->prepare("SELECT subject_id FROM subject_sections WHERE section_id = ?");
                 $stmt->execute([$section_id]);
                 $section_subjects = $stmt->fetchAll(PDO::FETCH_COLUMN);
                 $student_subject_ids = array_merge($student_subject_ids, $section_subjects);
             }
             
-            // For irregular students, add some extra subjects from different years
-            if ($is_irregular) {
+            // Handle irregular extra subjects
+            if ($is_irregular && !empty($all_subjects_by_program[$code])) {
                 $all_available_subjects = $all_subjects_by_program[$code];
                 $extra_count = rand(1, 3);
                 shuffle($all_available_subjects);
@@ -204,7 +389,7 @@ try {
                 for ($x = 0; $x < $extra_count && $x < count($all_available_subjects); $x++) {
                     $extra_subject = $all_available_subjects[$x];
                     if (!in_array($extra_subject['id'], $student_subject_ids)) {
-                        // Find a section that offers this subject
+                        // Find a section that offers this subject within the same program
                         $stmt = $pdo->prepare("
                             SELECT section_id FROM subject_sections ss
                             JOIN sections s ON ss.section_id = s.id
@@ -229,10 +414,10 @@ try {
             
             $student_subject_ids = array_unique($student_subject_ids);
             
-            // GENERATE COMPLETION RECORDS FOR ALL SUBJECTS
+            // Generate completion records
             $academic_year_start = 2022;
             
-            // First, mark all subjects from previous years as completed with passing grades
+            // Mark previous years as completed
             for ($year = 1; $year < $year_level; $year++) {
                 for ($sem = 1; $sem <= 2; $sem++) {
                     $semester_name = $sem == 1 ? '1st' : '2nd';
@@ -241,7 +426,6 @@ try {
                     $date_completed = date('Y-m-d', strtotime("$academic_year_start-" . ($sem == 1 ? '03-15' : '07-15')));
                     
                     foreach ($subjects as $subject) {
-                        // Generate passing grade (1.0 to 3.0)
                         $grade_options = [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0];
                         $grade = $grade_options[array_rand($grade_options)];
                         
@@ -259,9 +443,8 @@ try {
                 }
             }
             
-            // For current year, mark current semester subjects as 'in_progress'
+            // Mark current year subjects as in_progress
             $current_academic_year = ($academic_year_start + $year_level - 1) . '-' . ($academic_year_start + $year_level);
-            $subjects_to_mark = [];
             
             if ($year_level <= 4) {
                 $current_subjects = $curriculum_cache[$code][$year_level][$current_semester]['subjects'] ?? [];
@@ -277,8 +460,8 @@ try {
                 }
             }
             
-            // For irregular students, also mark their extra subjects as in_progress
-            if ($is_irregular) {
+            // Mark irregular extra subjects as in_progress
+            if ($is_irregular && !empty($extra_subjects)) {
                 $stmt = $pdo->prepare("
                     SELECT DISTINCT s.* 
                     FROM student_subjects ss
@@ -302,7 +485,7 @@ try {
                 }
             }
             
-            // Calculate total units from subjects the student is taking
+            // Calculate total units
             $total_units = 0;
             foreach ($student_subject_ids as $subj_id) {
                 $stmt = $pdo->prepare("SELECT units FROM subjects WHERE id = ?");
@@ -313,7 +496,7 @@ try {
             $stmt = $pdo->prepare("UPDATE students_info SET total_units = ? WHERE user_id = ?");
             $stmt->execute([$total_units, $user_id]);
             
-            // Generate payment records for enrolled students
+            // Generate payment records
             $total_units_sem = $curriculum_cache[$code][$year_level][$current_semester]['total_units'] ?? 0;
             $tuition = $total_units_sem * $unit_price;
             
@@ -364,13 +547,25 @@ try {
     }
     
     $pdo->commit();
-    echo "<h2 style='color:green'>Success! Generated $generated students.</h2>";
-    echo "<p><strong>Irregular students created: $irregular_count</strong></p>";
+    
+    echo "<hr>";
+    echo "<h2 style='color:green'>✅ Generation Complete!</h2>";
+    echo "<ul>";
+    echo "<li><strong>Fixed BSCS Year 1 Students:</strong> 5 students (Juan Dela Cruz, Maria Santos, Jose Reyes, Ana Gonzales, Carlos Mendoza)</li>";
+    echo "<li><strong>BSCS Section:</strong> BSCS1A created with all 5 students assigned</li>";
+    echo "<li><strong>Random Students Generated:</strong> " . ($generated) . " students</li>";
+    echo "<li><strong>Irregular students created:</strong> $irregular_count</li>";
+    echo "<li><strong>Total Students:</strong> " . ($generated + 5) . "</li>";
+    echo "</ul>";
     echo "<p>All regular students have passing grades (1.0 - 3.0) for completed subjects.</p>";
-    echo "<a href='manage_users.php' class='btn btn-primary'>Go to Manage Users</a>";
+    echo "<div class='mt-3'>";
+    echo "<a href='manage_users.php' class='btn btn-primary'>Go to Manage Users</a> ";
+    echo "<a href='../registrar/manage_students.php' class='btn btn-info'>Go to Registrar Dashboard</a>";
+    echo "</div>";
     
 } catch (Exception $e) {
     $pdo->rollBack();
-    echo "<h2 style='color:red'>Error: " . $e->getMessage() . "</h2>";
+    echo "<h2 style='color:red'>❌ Error: " . $e->getMessage() . "</h2>";
+    echo "<pre>" . $e->getTraceAsString() . "</pre>";
 }
 ?>

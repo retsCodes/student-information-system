@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $role = $_POST['role'] ?? '';
                 $password = $_POST['password'] ?? '';
                 $student_id = sanitizeInput($_POST['student_id'] ?? '');
-                $program = sanitizeInput($_POST['program'] ?? '');
+                $program = null;
                 $year_level = intval($_POST['year_level'] ?? 0);
 
                 if (empty($name)) {
@@ -246,8 +246,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $stmt = $pdo->prepare("UPDATE users SET name = ?, email = ? WHERE user_id = ?");
                             $stmt->execute([$name, $email, $final_user_id]);
                             if ($old_user['role'] === 'student') {
-                                $stmt = $pdo->prepare("UPDATE students_info SET name = ?, email = ?, program = ?, year_level = ? WHERE user_id = ?");
-                                $stmt->execute([$name, $email, $program, $year_level, $final_user_id]);
+                                $stmt = $pdo->prepare("UPDATE students_info SET name = ?, email = ?, year_level = ? WHERE user_id = ?");
+                                $stmt->execute([$name, $email, $year_level, $final_user_id]);
                             } else {
                                 $stmt = $pdo->prepare("UPDATE employee_info SET name = ?, email = ? WHERE user_id = ?");
                                 $stmt->execute([$name, $email, $final_user_id]);
@@ -436,6 +436,21 @@ while ($row = $stmt->fetch()) {
         'units' => $row['units'],
         'description' => $row['description']
     ];
+}
+
+// At the top of manage_users.php, ensure $programs is properly populated
+$programs = $pdo->query("SELECT DISTINCT program FROM subjects WHERE program IS NOT NULL AND program != '' ORDER BY program")->fetchAll(PDO::FETCH_COLUMN);
+if (empty($programs)) {
+    // Fallback programs if none found in subjects
+    $programs = ['BS Information Technology', 'BS Computer Science', 'BS Business Administration', 'BS Accountancy'];
+}
+
+// Also get courses from courses table as alternative
+$courses_from_table = $pdo->query("SELECT course_name FROM courses WHERE status = 'active' ORDER BY course_name")->fetchAll(PDO::FETCH_COLUMN);
+if (!empty($courses_from_table)) {
+    // Merge with programs, avoiding duplicates
+    $programs = array_unique(array_merge($programs, $courses_from_table));
+    sort($programs);
 }
 
 // student -> section map
@@ -807,6 +822,14 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                                             onclick="deleteUser('<?= htmlspecialchars($user['user_id']) ?>', '<?= htmlspecialchars($user['name']) ?>')"><i
                                                 class="fas fa-trash"></i></button>
                                     <?php endif; ?>
+                                    <?php if ($user['role'] === 'student'): ?>
+                                        <button class="btn btn-sm btn-outline-warning" onclick="openTransferModal('<?= htmlspecialchars($user['user_id']) ?>', 
+                                    '<?= htmlspecialchars($user['name']) ?>', 
+                                    '<?= htmlspecialchars($user['additional_info'] ?? '') ?>', 
+                                    '<?= $user['year_level'] ?>')">
+                                            <i class="fas fa-exchange-alt"></i> Transfer
+                                        </button>
+                                    <?php endif; ?>
                                 </div>
                             </td>
                         </tr>
@@ -836,6 +859,72 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                 </ul>
             </nav>
         <?php endif; ?>
+    </div>
+</div>
+
+<!-- Transfer Student Modal -->
+<div class="modal fade" id="transferStudentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" id="transferStudentForm">
+                <input type="hidden" name="csrf_token" value="<?= generateCSRFToken() ?>">
+                <input type="hidden" name="action" value="transfer_student">
+                <input type="hidden" name="student_id" id="transfer_student_id">
+                <input type="hidden" name="semester" value="1st">
+                <input type="hidden" name="academic_year" value="<?= date('Y') . '-' . (date('Y') + 1) ?>">
+
+                <div class="modal-header bg-warning text-white">
+                    <h5 class="modal-title"><i class="fas fa-exchange-alt me-2"></i>Transfer Student</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning small">
+                        <strong>⚠️ This will:</strong><br>
+                        - Remove student from ALL current sections<br>
+                        - Save current subjects as completed<br>
+                        - Change program and year level<br>
+                        - Student becomes "irregular" in new program
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Student Name</label>
+                        <input type="text" class="form-control" id="transfer_student_name" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Current Program</label>
+                        <input type="text" class="form-control" id="transfer_current_program" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Current Year Level</label>
+                        <input type="text" class="form-control" id="transfer_current_year" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Transfer to Program <span class="text-danger">*</span></label>
+                        <select class="form-select" id="transfer_to_course" name="to_course_id" required>
+                            <option value="">Loading programs...</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">New Year Level <span class="text-danger">*</span></label>
+                        <select class="form-select" name="year_level" required>
+                            <option value="">Select Year Level</option>
+                            <option value="1">Year 1</option>
+                            <option value="2">Year 2</option>
+                            <option value="3">Year 3</option>
+                            <option value="4">Year 4</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Transfer Reason</label>
+                        <textarea class="form-control" name="reason" rows="2"
+                            placeholder="Reason for transfer..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning">Confirm Transfer</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 
@@ -1114,20 +1203,17 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                                     records.</span></div>
                         </div>
                         <div class="row">
-                            <div class="col-md-6 mb-3"><label for="edit_program"
-                                    class="form-label">Program</label><select class="form-select" id="edit_program"
-                                    name="program">
-                                    <option value="">Select Program</option><?php foreach ($programs as $p): ?>
-                                        <option value="<?= htmlspecialchars($p) ?>"
-                                            data-code="<?= $program_codes[$p] ?? '00' ?>"><?= htmlspecialchars($p) ?> (Code:
-                                            <?= $program_codes[$p] ?? '00' ?>)
-                                        </option><?php endforeach; ?>
-                                </select></div>
-                            <div class="col-md-6 mb-3"><label for="edit_year_level" class="form-label">Year
-                                    Level</label><select class="form-select" id="edit_year_level" name="year_level">
-                                    <option value="">Select Year Level</option><?php for ($i = 1; $i <= 6; $i++): ?>
-                                        <option value="<?= $i ?>">Year <?= $i ?></option><?php endfor; ?>
-                                </select></div>
+                            <div class="col-md-12 mb-3">
+                                <label for="edit_year_level" class="form-label">Year Level</label>
+                                <select class="form-select" id="edit_year_level" name="year_level">
+                                    <option value="">Select Year Level</option>
+                                    <?php for ($i = 1; $i <= 6; $i++): ?>
+                                        <option value="<?= $i ?>">Year <?= $i ?></option>
+                                    <?php endfor; ?>
+                                </select>
+                                <small class="text-muted">Note: Program cannot be edited here. Use the Transfer button
+                                    to change program.</small>
+                            </div>
                         </div>
                     </div>
                     <div class="row mt-3">
@@ -1257,7 +1343,6 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
         </div>
     </div>
 </div>
-
 <!-- Edit Grades Modal -->
 <div class="modal fade" id="editGradesModal" tabindex="-1">
     <div class="modal-dialog modal-xl">
@@ -1272,22 +1357,90 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
 
                 <div class="alert alert-info mb-3" id="gradeStudentInfo"></div>
 
+                <!-- CSV Bulk Upload Section -->
+                <div class="card mb-4 border-success">
+                    <div class="card-header bg-success text-white">
+                        <h6 class="mb-0"><i class="fas fa-file-csv me-2"></i>Bulk Grade Upload (CSV)</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info small">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>CSV Format Instructions:</strong><br>
+                            - <strong>Column A:</strong> Student ID<br>
+                            - <strong>Column B:</strong> Student Name<br>
+                            - <strong>Column C:</strong> Subject Code<br>
+                            - <strong>Column D:</strong> Grade<br>
+                            - <strong>Column E:</strong> Subject Name (optional)<br>
+                            - <strong>Column F:</strong> Year Level (optional)<br>
+                            - <strong>Column G:</strong> Semester (optional)<br>
+                            
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-sm btn-outline-info" id="downloadBsit1aTemplateBtn">
+                                    <i class="fas fa-download me-1"></i> Download BSIT 1A Template
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-success" id="downloadCsvTemplateBtn">
+                                    <i class="fas fa-download me-1"></i> Download Empty Template
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <form id="csvUploadForm" enctype="multipart/form-data">
+                            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
+                            <input type="hidden" name="action" value="upload_grades_csv">
+                            <input type="hidden" name="student_id" id="csv_student_id">
+                            
+                            <div class="row align-items-end">
+                                <div class="col-md-8">
+                                    <label class="form-label">Select CSV File</label>
+                                    <input type="file" class="form-control" id="csv_file" name="csv_file" accept=".csv" required>
+                                    <div class="form-text">Maximum file size: 5MB. Only .csv files accepted.</div>
+                                </div>
+                                <div class="col-md-4">
+                                    <button type="submit" class="btn btn-success w-100" id="uploadCsvBtn">
+                                        <i class="fas fa-upload me-1"></i> Upload & Process
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div id="csvUploadProgress" style="display: none;" class="mt-3">
+                                <div class="progress">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                                </div>
+                                <p class="small text-muted mt-1" id="csvUploadStatus">Processing...</p>
+                            </div>
+                        </form>
+                        
+                        <div id="csvUploadResult" class="mt-3" style="display: none;"></div>
+                    </div>
+                </div>
+
+                <!-- Existing Grades Tabs -->
                 <ul class="nav nav-tabs" id="gradeYearTabs" role="tablist">
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="year1-tab" data-bs-toggle="tab" data-bs-target="#year1"
-                            type="button">Year 1</button>
+                        <button class="nav-link active" id="year1-tab" data-bs-toggle="tab" data-bs-target="#year1" type="button">Year 1</button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="year2-tab" data-bs-toggle="tab" data-bs-target="#year2"
-                            type="button">Year 2</button>
+                        <button class="nav-link" id="year2-tab" data-bs-toggle="tab" data-bs-target="#year2" type="button">Year 2</button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="year3-tab" data-bs-toggle="tab" data-bs-target="#year3"
-                            type="button">Year 3</button>
+                        <button class="nav-link" id="year3-tab" data-bs-toggle="tab" data-bs-target="#year3" type="button">Year 3</button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="year4-tab" data-bs-toggle="tab" data-bs-target="#year4"
-                            type="button">Year 4</button>
+                        <button class="nav-link" id="year4-tab" data-bs-toggle="tab" data-bs-target="#year4" type="button">Year 4
+
+                <!-- Existing Grades Tabs -->
+                <ul class="nav nav-tabs" id="gradeYearTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="year1-tab" data-bs-toggle="tab" data-bs-target="#year1" type="button">Year 1</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="year2-tab" data-bs-toggle="tab" data-bs-target="#year2" type="button">Year 2</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="year3-tab" data-bs-toggle="tab" data-bs-target="#year3" type="button">Year 3</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="year4-tab" data-bs-toggle="tab" data-bs-target="#year4" type="button">Year 4</button>
                     </li>
                 </ul>
 
@@ -1299,6 +1452,7 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                                     <tr>
                                         <th>Subject Code</th>
                                         <th>Subject Name</th>
+                                        <th>Units</th>
                                         <th>Semester</th>
                                         <th>Grade</th>
                                         <th>Date Completed</th>
@@ -1316,6 +1470,7 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                                     <tr>
                                         <th>Subject Code</th>
                                         <th>Subject Name</th>
+                                        <th>Units</th>
                                         <th>Semester</th>
                                         <th>Grade</th>
                                         <th>Date Completed</th>
@@ -1333,6 +1488,7 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                                     <tr>
                                         <th>Subject Code</th>
                                         <th>Subject Name</th>
+                                        <th>Units</th>
                                         <th>Semester</th>
                                         <th>Grade</th>
                                         <th>Date Completed</th>
@@ -1340,7 +1496,7 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                                     </tr>
                                 </thead>
                                 <tbody></tbody>
-                            </table>
+                            <td>
                         </div>
                     </div>
                     <div class="tab-pane fade" id="year4">
@@ -1350,6 +1506,7 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                                     <tr>
                                         <th>Subject Code</th>
                                         <th>Subject Name</th>
+                                        <th>Units</th>
                                         <th>Semester</th>
                                         <th>Grade</th>
                                         <th>Date Completed</th>
@@ -1371,7 +1528,6 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
         </div>
     </div>
 </div>
-
 
 <!-- Reset Password Modal -->
 <div class="modal fade" id="resetPasswordModal" tabindex="-1">
@@ -1525,6 +1681,141 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
             }
         }
         updateSummary();
+    }
+    // Transfer student functions
+    let transferCurrentStudentId = null;
+    let transferCurrentCourseId = null;  // Add this variable
+    // Transfer Student Functions
+    function openTransferModal(studentId, studentName, currentProgram, currentYear) {
+        document.getElementById('transfer_student_id').value = studentId;
+        document.getElementById('transfer_student_name').value = studentName;
+        document.getElementById('transfer_current_program').value = currentProgram || 'N/A';
+        document.getElementById('transfer_current_year').value = currentYear || 'N/A';
+
+        // Reset form
+        document.getElementById('transfer_to_course').innerHTML = '<option value="">Loading programs...</option>';
+
+        // Load available courses
+        fetch(`ajax_handler.php?action=get_available_courses_for_transfer&student_id=${studentId}`)
+            .then(response => response.json())
+            .then(data => {
+                const select = document.getElementById('transfer_to_course');
+                if (data.success && data.courses && data.courses.length > 0) {
+                    select.innerHTML = '<option value="">Select Program...</option>';
+                    data.courses.forEach(course => {
+                        select.innerHTML += `<option value="${course.id}">${course.course_code} - ${course.course_name}</option>`;
+                    });
+                } else {
+                    select.innerHTML = '<option value="">No other programs available</option>';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('transfer_to_course').innerHTML = '<option value="">Error loading programs</option>';
+            });
+
+        new bootstrap.Modal(document.getElementById('transferStudentModal')).show();
+    }
+
+    // Handle transfer form submission
+    document.getElementById('transferStudentForm')?.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+
+        fetch('ajax_handler.php', {
+            method: 'POST',
+            body: new FormData(this)
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    // Close modal and refresh
+                    bootstrap.Modal.getInstance(document.getElementById('transferStudentModal')).hide();
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.message);
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalText;
+                }
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalText;
+            });
+    });
+
+    function loadCurriculumForTransfer() {
+        const courseId = document.getElementById('transfer_to_course').value;
+        const studentId = transferCurrentStudentId;
+
+        if (!courseId) {
+            document.getElementById('transfer_curriculum_comparison').innerHTML = `
+            <div class="alert alert-info">Select a program to view curriculum comparison.</div>
+        `;
+            return;
+        }
+
+        document.getElementById('transfer_curriculum_comparison').innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading curriculum...</span>
+            </div>
+            <p class="mt-2">Loading curriculum comparison...</p>
+        </div>
+    `;
+
+        fetch(`ajax_handler.php?action=get_transfer_curriculum_comparison&student_id=${studentId}&course_id=${courseId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    let html = '<h6 class="mb-3">Subjects That Can Be Credited:</h6>';
+                    if (data.creditable_subjects && data.creditable_subjects.length > 0) {
+                        html += '<div class="table-responsive"><table class="table table-sm table-striped">';
+                        html += '<thead><tr><th>Completed Subject</th><th>Grade</th><th>Equivalent in New Program</th><th>Creditable</th></tr></thead><tbody>';
+                        data.creditable_subjects.forEach(subj => {
+                            html += `<tr>
+                            <td><code>${subj.completed_code}</code> - ${subj.completed_name}</td>
+                            <td>${subj.grade ? subj.grade : '—'}</td>
+                            <td><code>${subj.equivalent_code || '—'}</code> - ${subj.equivalent_name || '—'}</td>
+                            <td><span class="badge bg-${subj.can_credit ? 'success' : 'secondary'}">${subj.can_credit ? 'Yes' : 'Manual Review'}</span></td>
+                        </tr>`;
+                        });
+                        html += '</tbody></table></div>';
+                    } else {
+                        html += '<div class="alert alert-warning">No subjects from previous courses can be automatically credited to this program.</div>';
+                    }
+
+                    html += '<hr><div class="alert alert-success">';
+                    html += `<strong>Transfer Summary:</strong><br>`;
+                    html += `Current completed subjects: ${data.completed_count}<br>`;
+                    html += `Subjects that can be credited: ${data.creditable_count}<br>`;
+                    html += `Subjects to take: ${data.remaining_count}`;
+                    html += `</div>`;
+
+                    document.getElementById('transfer_curriculum_comparison').innerHTML = html;
+                } else {
+                    document.getElementById('transfer_curriculum_comparison').innerHTML = `
+                    <div class="alert alert-danger">${data.message || 'Error loading curriculum comparison'}</div>
+                `;
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('transfer_curriculum_comparison').innerHTML = `
+                <div class="alert alert-danger">Error loading curriculum comparison. Please try again.</div>
+            `;
+            });
+    }
+
+    // Modify the edit button in the table to include transfer option
+    function updateEditButtonWithTransfer(userId, name, email, role, program, yearLevel) {
+        // This function would be called from the existing openEditModal
+        // Add a "Transfer Student" button for student roles
     }
 
     function handleSelectAll(e) {
@@ -1910,6 +2201,562 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
         printWindow.document.write(printContent);
         printWindow.document.close();
     }
+// ====================================================
+// EXCEL/CSV GRADE UPLOAD FUNCTIONS (Inside Grades Modal)
+// ====================================================
+
+let currentStudentIdForCsv = null;
+
+// Modify editStudentGrades to set CSV student ID
+const originalEditStudentGrades = window.editStudentGrades;
+window.editStudentGrades = function(studentId, studentName) {
+    if (originalEditStudentGrades) {
+        originalEditStudentGrades(studentId, studentName);
+    }
+    document.getElementById('csv_student_id').value = studentId;
+    currentStudentIdForCsv = studentId;
+    
+    // Clear previous upload results
+    const resultDiv = document.getElementById('csvUploadResult');
+    if (resultDiv) {
+        resultDiv.style.display = 'none';
+        resultDiv.innerHTML = '';
+    }
+    const fileInput = document.getElementById('csv_file');
+    if (fileInput) {
+        fileInput.value = '';
+    }
+};
+
+async function uploadGradesCSV(studentId) {
+    const form = document.getElementById('csvUploadForm');
+    const fileInput = document.getElementById('csv_file');
+    const progressDiv = document.getElementById('csvUploadProgress');
+    const progressBar = progressDiv.querySelector('.progress-bar');
+    const statusText = document.getElementById('csvUploadStatus');
+    const resultDiv = document.getElementById('csvUploadResult');
+    const uploadBtn = document.getElementById('uploadCsvBtn');
+    
+    if (!fileInput.files.length) {
+        showToast('Please select a CSV file', 'warning');
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+        showToast('Please upload a valid CSV file', 'danger');
+        return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) {
+        showToast('File size exceeds 5MB limit', 'danger');
+        return;
+    }
+    
+    // Show progress
+    progressDiv.style.display = 'block';
+    progressBar.style.width = '0%';
+    statusText.textContent = 'Uploading file...';
+    uploadBtn.disabled = true;
+    resultDiv.style.display = 'none';
+    
+    const formData = new FormData(form);
+    formData.set('student_id', studentId);
+    
+    // Simulate progress
+    let progress = 0;
+    const interval = setInterval(() => {
+        progress += 10;
+        if (progress <= 90) {
+            progressBar.style.width = progress + '%';
+        }
+    }, 200);
+    
+    try {
+        const response = await fetch('../admin/ajax_handler.php', {
+            method: 'POST',
+            body: formData
+        });
+        
+        clearInterval(interval);
+        
+        const result = await response.json();
+        
+        progressBar.style.width = '100%';
+        
+        if (result.success) {
+            statusText.textContent = 'Processing complete!';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    <strong>Success!</strong> ${result.message}<br>
+                    <small>${result.details || ''}</small>
+                    ${result.errors && result.errors.length > 0 ? 
+                        '<br><br><strong>Warnings/Errors:</strong><ul class="mb-0">' + 
+                        result.errors.map(e => `<li class="small">${escapeHtml(e)}</li>`).join('') + 
+                        '</ul>' : ''}
+                </div>
+            `;
+            
+            // Refresh grades display after successful upload
+            setTimeout(() => {
+                const studentIdVal = document.getElementById('grade_student_id').value;
+                const studentNameVal = document.getElementById('grade_student_name').value;
+                if (studentIdVal && studentNameVal) {
+                    fetchStudentGrades(studentIdVal);
+                }
+            }, 2000);
+        } else {
+            statusText.textContent = 'Upload failed';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Error!</strong> ${escapeHtml(result.message)}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Upload error:', error);
+        statusText.textContent = 'Upload failed';
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                <strong>Error!</strong> Network error. Please try again.
+            </div>
+        `;
+    } finally {
+        setTimeout(() => {
+            progressBar.style.width = '0%';
+            progressDiv.style.display = 'none';
+        }, 3000);
+        uploadBtn.disabled = false;
+        fileInput.value = '';
+    }
+}
+
+function fetchStudentGrades(studentId) {
+    fetch(`ajax_handler.php?action=get_student_grades&student_id=${studentId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.grades) {
+                renderGradeTables(data.grades);
+            }
+        })
+        .catch(error => console.error('Error fetching grades:', error));
+}
+
+// ====================================================
+// BULK GRADE UPLOAD FUNCTIONS
+// ====================================================
+
+// Toggle containers based on upload type
+document.getElementById('upload_type')?.addEventListener('change', function() {
+    const type = this.value;
+    const sectionContainer = document.getElementById('section_select_container');
+    const subjectContainer = document.getElementById('subject_select_container');
+    const sectionSelect = document.getElementById('bulk_section_id');
+    const subjectSelect = document.getElementById('bulk_subject_id');
+    
+    sectionContainer.style.display = type === 'section' ? 'block' : 'none';
+    subjectContainer.style.display = type === 'subject' ? 'block' : 'none';
+    
+    document.getElementById('upload_type_hidden').value = type;
+    
+    if (type === 'section') {
+        sectionSelect.required = true;
+        subjectSelect.required = false;
+    } else if (type === 'subject') {
+        sectionSelect.required = false;
+        subjectSelect.required = true;
+    } else {
+        sectionSelect.required = false;
+        subjectSelect.required = false;
+    }
+});
+
+// Update hidden fields when selection changes
+document.getElementById('bulk_section_id')?.addEventListener('change', function() {
+    document.getElementById('upload_section_id').value = this.value;
+});
+
+document.getElementById('bulk_subject_id')?.addEventListener('change', function() {
+    document.getElementById('upload_subject_id').value = this.value;
+});
+
+// Download template based on upload type
+document.getElementById('downloadGradeTemplate')?.addEventListener('click', function(e) {
+    e.preventDefault();
+    downloadGradeTemplate();
+});
+
+function downloadGradeTemplate() {
+    const uploadType = document.getElementById('upload_type').value;
+    const sectionId = document.getElementById('bulk_section_id').value;
+    const subjectId = document.getElementById('bulk_subject_id').value;
+    
+    if (uploadType === 'section' && !sectionId) {
+        alert('Please select a section first');
+        return;
+    }
+    
+    if (uploadType === 'subject' && !subjectId) {
+        alert('Please select a subject first');
+        return;
+    }
+    
+    let url = `ajax_handler.php?action=download_grade_template&upload_type=${uploadType}`;
+    if (sectionId) url += `&section_id=${sectionId}`;
+    if (subjectId) url += `&subject_id=${subjectId}`;
+    
+    window.open(url, '_blank');
+}
+
+// Upload grades
+async function uploadBulkGrades() {
+    const form = document.getElementById('bulkGradeUploadForm');
+    const fileInput = document.getElementById('bulk_csv_file');
+    const uploadType = document.getElementById('upload_type').value;
+    const sectionId = document.getElementById('bulk_section_id').value;
+    const subjectId = document.getElementById('bulk_subject_id').value;
+    const progressDiv = document.getElementById('bulkUploadProgress');
+    const progressBar = progressDiv.querySelector('.progress-bar');
+    const statusText = document.getElementById('bulkUploadStatus');
+    const resultDiv = document.getElementById('bulkUploadResult');
+    const uploadBtn = document.getElementById('uploadGradesBtn');
+    
+    if (!fileInput.files.length) {
+        alert('Please select a CSV file');
+        return;
+    }
+    
+    if (uploadType === 'section' && !sectionId) {
+        alert('Please select a section');
+        return;
+    }
+    
+    if (uploadType === 'subject' && !subjectId) {
+        alert('Please select a subject');
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+        alert('Please upload a valid CSV file');
+        return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) {
+        alert('File size exceeds 5MB limit');
+        return;
+    }
+    
+    progressDiv.style.display = 'block';
+    progressBar.style.width = '0%';
+    statusText.textContent = 'Uploading file...';
+    uploadBtn.disabled = true;
+    resultDiv.style.display = 'none';
+    
+    const formData = new FormData(form);
+    
+    // Simulate progress
+    let progress = 0;
+    const interval = setInterval(() => {
+        progress += 10;
+        if (progress <= 90) {
+            progressBar.style.width = progress + '%';
+        }
+    }, 200);
+    
+    try {
+        const response = await fetch('../admin/ajax_handler.php', {
+            method: 'POST',
+            body: formData
+        });
+        
+        clearInterval(interval);
+        
+        const result = await response.json();
+        
+        progressBar.style.width = '100%';
+        
+        if (result.success) {
+            statusText.textContent = 'Processing complete!';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    <strong>Success!</strong> ${result.message}<br>
+                    <small>${result.details || ''}</small>
+                    ${result.errors && result.errors.length > 0 ? 
+                        '<br><br><strong>Warnings/Errors:</strong><ul class="mb-0">' + 
+                        result.errors.map(e => `<li class="small">${escapeHtml(e)}</li>`).join('') + 
+                        '</ul>' : ''}
+                </div>
+            `;
+            
+            // Reset form after successful upload
+            setTimeout(() => {
+                fileInput.value = '';
+            }, 2000);
+        } else {
+            statusText.textContent = 'Upload failed';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Error!</strong> ${escapeHtml(result.message)}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Upload error:', error);
+        statusText.textContent = 'Upload failed';
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                <strong>Error!</strong> Network error. Please try again.
+            </div>
+        `;
+    } finally {
+        setTimeout(() => {
+            progressBar.style.width = '0%';
+            progressDiv.style.display = 'none';
+        }, 3000);
+        uploadBtn.disabled = false;
+    }
+}
+
+// Add event listener
+document.getElementById('bulkGradeUploadForm')?.addEventListener('submit', function(e) {
+    e.preventDefault();
+    uploadBulkGrades();
+});
+
+// Add Bulk Upload button to the page (add near Add User button)
+document.addEventListener('DOMContentLoaded', function() {
+    const buttonContainer = document.querySelector('.d-flex.justify-content-between.align-items-center.mb-4 .btn-group, .d-flex.justify-content-between.align-items-center.mb-4 > div:first-child');
+    if (buttonContainer) {
+        const bulkBtn = document.createElement('button');
+        bulkBtn.className = 'btn btn-success me-2';
+        bulkBtn.setAttribute('data-bs-toggle', 'modal');
+        bulkBtn.setAttribute('data-bs-target', '#bulkGradeUploadModal');
+        bulkBtn.innerHTML = '<i class="fas fa-file-csv me-1"></i> Bulk Upload Grades';
+        buttonContainer.parentElement.insertBefore(bulkBtn, buttonContainer.parentElement.firstChild);
+    }
+});
+
+function renderGradeTables(grades) {
+    // Clear all tables
+    for (let year = 1; year <= 4; year++) {
+        const tbody = document.querySelector(`#grades-table-year${year} tbody`);
+        if (tbody) tbody.innerHTML = '';
+    }
+    
+    // Group grades by year
+    const groupedGrades = {};
+    grades.forEach(grade => {
+        const year = grade.year_level;
+        if (!groupedGrades[year]) groupedGrades[year] = [];
+        groupedGrades[year].push(grade);
+    });
+    
+    // Render each year's grades
+    for (let year = 1; year <= 4; year++) {
+        const tbody = document.querySelector(`#grades-table-year${year} tbody`);
+        if (tbody && groupedGrades[year]) {
+            // Sort by semester
+            const sortedGrades = groupedGrades[year].sort((a, b) => {
+                const semOrder = {'1st': 1, '2nd': 2, 'summer': 3};
+                return semOrder[a.semester] - semOrder[b.semester];
+            });
+            
+            sortedGrades.forEach(grade => {
+                const row = document.createElement('tr');
+                row.dataset.subjectId = grade.subject_id;
+                row.dataset.year = grade.year_level;
+                row.dataset.semester = grade.semester;
+                row.innerHTML = `
+                    <td><code>${escapeHtml(grade.subject_code)}</code></td>
+                    <td>${escapeHtml(grade.subject_name)}<br><small class="text-muted">${grade.units} units</small></td>
+                    <td>${grade.units}</td>
+                    <td>${grade.semester}</td>
+                    <td>
+                        <input type="number" class="form-control form-control-sm grade-input" 
+                               value="${grade.grade || ''}" step="0.01" min="1.0" max="5.0"
+                               style="width: 80px;" placeholder="—">
+                    </span></td>
+                    <td>
+                        <input type="date" class="form-control form-control-sm date-input" 
+                               value="${grade.date_completed || ''}" style="width: 130px;">
+                    </span></td>
+                    <td>
+                        <select class="form-select form-select-sm status-select" style="width: 130px;">
+                            <option value="completed" ${grade.status === 'completed' ? 'selected' : ''}>Completed</option>
+                            <option value="in_progress" ${grade.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
+                            <option value="failed" ${grade.status === 'failed' ? 'selected' : ''}>Failed</option>
+                            <option value="pending" ${grade.status === 'pending' ? 'selected' : ''}>Pending</option>
+                            <option value="upcoming" ${grade.status === 'upcoming' ? 'selected' : ''}>Upcoming</option>
+                        </select>
+                    </span></td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+    }
+}
+
+function downloadCsvTemplate() {
+    // BSCS 1st Year Regular Grade Sheet - 1st Semester
+    const headers = ['Subject Code', 'Grade', 'Year Level', 'Semester', 'Academic Year'];
+    const sampleRows = [
+        ['GE101', '', '1', '1st', '2024-2025'],
+        ['GE102', '', '1', '1st', '2024-2025'],
+        ['GE103', '', '1', '1st', '2024-2025'],
+        ['GE104', '', '1', '1st', '2024-2025'],
+        ['CS101', '', '1', '1st', '2024-2025'],
+        ['CS102', '', '1', '1st', '2024-2025'],
+        ['CS104', '', '1', '1st', '2024-2025'],
+        ['PE1', '', '1', '1st', '2024-2025'],
+        ['NSTP1', '', '1', '1st', '2024-2025']
+    ];
+    
+    let csvContent = headers.join(',') + '\n';
+    sampleRows.forEach(row => {
+        csvContent += row.join(',') + '\n';
+    });
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'grade_upload_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showToast('Template downloaded! Fill in the grades and upload.', 'success');
+}
+
+function showToast(message, type = 'success') {
+    const toastHtml = `
+        <div class="toast align-items-center text-white bg-${type === 'success' ? 'success' : 'danger'} border-0 position-fixed bottom-0 end-0 m-3" role="alert" style="z-index: 9999;">
+            <div class="d-flex">
+                <div class="toast-body">${escapeHtml(message)}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    const container = document.createElement('div');
+    container.innerHTML = toastHtml;
+    document.body.appendChild(container);
+    const toast = new bootstrap.Toast(container.querySelector('.toast'), { delay: 3000 });
+    toast.show();
+    setTimeout(() => container.remove(), 3500);
+}
+
+// Add event listeners when modal is opened
+document.getElementById('editGradesModal')?.addEventListener('shown.bs.modal', function() {
+    // Re-attach event listeners for CSV upload
+    const csvForm = document.getElementById('csvUploadForm');
+    if (csvForm) {
+        // Remove old listener to avoid duplicates
+        const newForm = csvForm.cloneNode(true);
+        csvForm.parentNode.replaceChild(newForm, csvForm);
+        
+        newForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const studentId = document.getElementById('csv_student_id').value;
+            if (!studentId) {
+                showToast('No student selected', 'warning');
+                return;
+            }
+            uploadGradesCSV(studentId);
+        });
+    }
+    
+    // Re-attach download template listener
+    const downloadBtn = document.getElementById('downloadCsvTemplate');
+    if (downloadBtn) {
+        const newBtn = downloadBtn.cloneNode(true);
+        downloadBtn.parentNode.replaceChild(newBtn, downloadBtn);
+        newBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            downloadCsvTemplate();
+        });
+    }
+});
+
+// Initial event listeners (for page load)
+document.addEventListener('DOMContentLoaded', function() {
+    const csvForm = document.getElementById('csvUploadForm');
+    if (csvForm) {
+        csvForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const studentId = document.getElementById('csv_student_id').value;
+            if (!studentId) {
+                alert('No student selected. Please close and reopen the grades modal.');
+                return;
+            }
+            uploadGradesCSV(studentId);
+        });
+    }
+    
+    const downloadBtn = document.getElementById('downloadCsvTemplate');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            downloadCsvTemplate();
+        });
+    }
+});
+
+function downloadCsvTemplate() {
+    // CSV Template content
+    const headers = ['Subject Code', 'Grade', 'Year Level', 'Semester', 'Academic Year'];
+    const sampleRows = [
+        ['IT101', '1.25', '1', '1st', '2024-2025'],
+        ['IT102', '2.0', '1', '1st', '2024-2025'],
+        ['GE101', '1.75', '1', '1st', '2024-2025'],
+        ['GE102', 'A', '1', '1st', '2024-2025'],
+        ['IT201', 'B+', '2', '1st', '2024-2025'],
+        ['IT202', 'P', '2', '1st', '2024-2025'],
+        ['CS101', '3.0', '2', '2nd', '2024-2025'],
+        ['', '', '', '', '']
+    ];
+    
+    let csvContent = headers.join(',') + '\n';
+    sampleRows.forEach(row => {
+        csvContent += row.join(',') + '\n';
+    });
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'grade_upload_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showMessage('Template downloaded!', 'success');
+}
+
+// Add event listener for CSV upload form
+document.getElementById('csvUploadForm')?.addEventListener('submit', function(e) {
+    e.preventDefault();
+    const studentId = document.getElementById('csv_student_id').value;
+    if (!studentId) {
+        showMessage('No student selected. Please close and reopen the grades modal.', 'warning');
+        return;
+    }
+    uploadGradesCSV(studentId);
+});
 
     function viewUserDetails(userId) {
         document.getElementById('modalUserName').textContent = 'Loading...';
@@ -2003,11 +2850,63 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
         document.getElementById('edit_user_role').value = role;
         document.getElementById('edit_name').value = name;
         document.getElementById('edit_email').value = email;
+
         const editStudentFields = document.getElementById('editStudentFields');
+        const programSelect = document.getElementById('edit_program');
+        const yearLevelSelect = document.getElementById('edit_year_level');
+
         if (role === 'student') {
+            // Get fresh student data including transfer info
+            fetch(`ajax_handler.php?action=get_student_full_info&student_id=${userId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Show that this student has transferred if applicable
+                        if (data.has_transferred) {
+                            const transferWarning = document.createElement('div');
+                            transferWarning.className = 'alert alert-warning mb-3';
+                            transferWarning.innerHTML = `
+                            <i class="fas fa-exchange-alt me-2"></i>
+                            <strong>This student has transferred programs!</strong><br>
+                            Original program: ${data.original_program}<br>
+                            Current program: ${data.current_program}<br>
+                            Transfer date: ${data.transfer_date}
+                        `;
+                            const modalBody = document.querySelector('#editUserModal .modal-body');
+                            if (!document.querySelector('#transferWarning')) {
+                                transferWarning.id = 'transferWarning';
+                                modalBody.insertBefore(transferWarning, modalBody.firstChild);
+                            }
+                        }
+
+                        // Set program and year level
+                        programSelect.value = data.current_program || program;
+                        yearLevelSelect.value = data.year_level || yearLevel;
+
+                        // Disable program editing if student has transferred
+                        if (data.has_transferred) {
+                            programSelect.disabled = true;
+                            programSelect.title = "Program cannot be edited - student has transferred. Use Transfer button to change program.";
+                            yearLevelSelect.disabled = false; // Year level can still be updated
+                        } else {
+                            programSelect.disabled = false;
+                        }
+                    } else {
+                        programSelect.value = program || '';
+                        yearLevelSelect.value = yearLevel || '';
+                        programSelect.disabled = false;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching student info:', error);
+                    programSelect.value = program || '';
+                    yearLevelSelect.value = yearLevel || '';
+                    programSelect.disabled = false;
+                });
+
             editStudentFields.style.display = 'block';
-            document.getElementById('edit_program').value = program || '';
-            document.getElementById('edit_year_level').value = yearLevel || '';
+
+            // Parse Student ID
             const idPattern = /^C?([0-9]{2})-([0-9]{2})-([0-9]{4})-MAN121$/i;
             const match = userId.match(idPattern);
             if (match) {
@@ -2016,41 +2915,38 @@ renderPageStart('Manage Users', 'admin', 'manage_users.php');
                 document.getElementById('edit_student_program_code').value = programCode;
                 document.getElementById('edit_student_number').value = studentNumber;
                 document.getElementById('edit_student_id').value = `C${year}-${programCode}-${studentNumber}-MAN121`;
-                const programSelect = document.getElementById('edit_program');
-                for (let i = 0; i < programSelect.options.length; i++) {
-                    const option = programSelect.options[i];
-                    if (option.getAttribute('data-code') === programCode) { programSelect.value = option.value; break; }
-                }
             } else {
                 document.getElementById('edit_student_year').value = '';
                 document.getElementById('edit_student_program_code').value = '';
                 document.getElementById('edit_student_number').value = '';
                 document.getElementById('edit_student_id').value = userId;
             }
+
             const updateHiddenID = function () {
                 const year = document.getElementById('edit_student_year').value;
                 const programCode = document.getElementById('edit_student_program_code').value;
                 const number = document.getElementById('edit_student_number').value;
-                if (year && programCode && number) document.getElementById('edit_student_id').value = `C${year}-${programCode}-${number}-MAN121`;
+                if (year && programCode && number) {
+                    document.getElementById('edit_student_id').value = `C${year}-${programCode}-${number}-MAN121`;
+                }
             };
+
             document.getElementById('edit_student_year').oninput = updateHiddenID;
             document.getElementById('edit_student_program_code').oninput = updateHiddenID;
             document.getElementById('edit_student_number').oninput = updateHiddenID;
-            document.getElementById('edit_student_program_code').onchange = function () {
-                const code = this.value;
-                const programSelect = document.getElementById('edit_program');
-                for (let i = 0; i < programSelect.options.length; i++) if (programSelect.options[i].getAttribute('data-code') === code) { programSelect.value = programSelect.options[i].value; break; }
-            };
-            document.getElementById('edit_program').onchange = function () {
-                const selectedOption = this.options[this.selectedIndex];
-                const code = selectedOption.getAttribute('data-code');
-                if (code) { document.getElementById('edit_student_program_code').value = code; updateHiddenID(); }
-            };
+
         } else {
             editStudentFields.style.display = 'none';
         }
+
         document.getElementById('edit_new_password').value = '';
         new bootstrap.Modal(document.getElementById('editUserModal')).show();
+    }
+
+    // Add function to get student full info
+    function getStudentFullInfo(studentId) {
+        return fetch(`ajax_handler.php?action=get_student_full_info&student_id=${studentId}`)
+            .then(response => response.json());
     }
 
     function toggleStatus(userId, userName, currentStatus) {

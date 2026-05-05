@@ -34,7 +34,7 @@ $stats['total_revenue'] = $stmt->fetch()['total'];
 $stmt = $pdo->query("SELECT COALESCE(SUM(remaining_balance), 0) as total FROM payments");
 $stats['total_outstanding'] = $stmt->fetch()['total'];
 
-// Recent users with last login
+// List of users with last login
 $stmt = $pdo->query("SELECT u.user_id, u.name, u.role, u.last_active, u.user_status 
                      FROM users u 
                      ORDER BY u.last_active DESC 
@@ -638,7 +638,7 @@ renderPageStart('Admin Dashboard', 'admin', 'dashboard.php');
         
         $users_footer = '<a href="manage_users.php" class="btn btn-primary">Manage All Users</a>';
         
-        echo renderCard('Recent Users', $users_content, $users_footer);
+        echo renderCard('List of Users', $users_content, $users_footer);
         ?>
     </div>
 </div>

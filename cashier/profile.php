@@ -367,70 +367,8 @@ renderPageStart('Cashier Profile', 'cashier', 'profile.php');
             </div>
         </div>
         
-        <!-- Change Password -->
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="fas fa-lock"></i> Change Password
-                </h5>
-            </div>
-            <div class="card-body">
-                <form method="POST">
-                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-                    <input type="hidden" name="action" value="change_password">
-                    
-                    <div class="mb-3">
-                        <label for="current_password" class="form-label">Current Password</label>
-                        <input type="password" class="form-control" id="current_password" name="current_password" required>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label for="new_password" class="form-label">New Password</label>
-                            <input type="password" class="form-control" id="new_password" name="new_password" 
-                                   minlength="6" required>
-                            <div class="form-text">Minimum 6 characters</div>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label for="confirm_password" class="form-label">Confirm New Password</label>
-                            <input type="password" class="form-control" id="confirm_password" name="confirm_password" 
-                                   minlength="6" required>
-                        </div>
-                    </div>
-                    
-                    <button type="submit" class="btn btn-warning">
-                        <i class="fas fa-key"></i> Change Password
-                    </button>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
-
 <script>
-// Password confirmation validation
-document.getElementById('confirm_password').addEventListener('input', function() {
-    const newPassword = document.getElementById('new_password').value;
-    const confirmPassword = this.value;
-    
-    if (newPassword !== confirmPassword) {
-        this.setCustomValidity('Passwords do not match');
-    } else {
-        this.setCustomValidity('');
-    }
-});
 
-// Form validation
-document.getElementById('updateInfoForm').addEventListener('submit', function(e) {
-    const number = document.getElementById('number').value;
-    const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
-    
-    if (number && !phoneRegex.test(number.replace(/[\s\-\(\)]/g, ''))) {
-        e.preventDefault();
-        alert('Please enter a valid phone number');
-        return false;
-    }
-});
 </script>
 
 <?php renderPageEnd(); ?>

@@ -114,6 +114,8 @@ renderPageStart('Student Dashboard', 'student', 'dashboard.php');
     </div>
 </div>
 
+
+
 <!-- Academic Progress Stats -->
 <div class="row mb-4">
     <div class="col-12">
@@ -149,6 +151,29 @@ renderPageStart('Student Dashboard', 'student', 'dashboard.php');
         </div>
     </div>
 </div>
+
+
+<!-- Important Notices -->
+<?php if (($payment_stats['total_due'] ?? 0) > 0): ?>
+<div class="row">
+    <div class="col-12">
+        <div class="alert alert-warning">
+            <h5 class="alert-heading">
+                <i class="fas fa-exclamation-triangle"></i> Payment Reminder
+            </h5>
+            <p>You have <strong><?php echo $payment_stats['unpaid_count']; ?></strong> payment(s) with outstanding balance 
+               totaling <strong>₱<?php echo number_format($payment_stats['total_due'], 2); ?></strong>.</p>
+            <hr>
+            <p class="mb-0">
+                <a href="payments.php" class="btn btn-warning">
+                    <i class="fas fa-eye"></i> View Due Payments
+                </a>
+            </p>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 
 <div class="row">
     <!-- Recent Payments -->
@@ -267,26 +292,5 @@ renderPageStart('Student Dashboard', 'student', 'dashboard.php');
         ?>
     </div>
 </div>
-
-<!-- Important Notices -->
-<?php if (($payment_stats['total_due'] ?? 0) > 0): ?>
-<div class="row">
-    <div class="col-12">
-        <div class="alert alert-warning">
-            <h5 class="alert-heading">
-                <i class="fas fa-exclamation-triangle"></i> Payment Reminder
-            </h5>
-            <p>You have <strong><?php echo $payment_stats['unpaid_count']; ?></strong> payment(s) with outstanding balance 
-               totaling <strong>₱<?php echo number_format($payment_stats['total_due'], 2); ?></strong>.</p>
-            <hr>
-            <p class="mb-0">
-                <a href="payments.php" class="btn btn-warning">
-                    <i class="fas fa-eye"></i> View Due Payments
-                </a>
-            </p>
-        </div>
-    </div>
-</div>
-<?php endif; ?>
 
 <?php renderPageEnd(); ?>

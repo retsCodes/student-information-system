@@ -184,12 +184,37 @@ if (!empty($search)) {
 
 $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
 
+// =======================================================
+// PAGINATION SETUP
+// =======================================================
+$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$per_page = isset($_GET['per_page']) ? intval($_GET['per_page']) : 25;
+
+// Validate per_page values
+$allowed_per_page = [10, 25, 50, 100];
+if (!in_array($per_page, $allowed_per_page)) {
+    $per_page = 25;
+}
+
+$offset = ($page - 1) * $per_page;
+
+// Get total count for pagination
+$count_sql = "SELECT COUNT(*) as total
+              FROM payments p
+              JOIN students_info si ON p.student_id = si.user_id
+              {$where_clause}";
+$stmt = $pdo->prepare($count_sql);
+$stmt->execute($params);
+$total_records = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$total_pages = ceil($total_records / $per_page);
+
+// Get paginated results
 $query = "SELECT p.*, si.name as student_name, si.program, si.year_level
           FROM payments p
           JOIN students_info si ON p.student_id = si.user_id
           {$where_clause}
           ORDER BY p.issued_date DESC, p.id DESC
-          LIMIT 200";
+          LIMIT " . intval($per_page) . " OFFSET " . intval($offset);
 
 $stmt = $pdo->prepare($query);
 $stmt->execute($params);
@@ -279,7 +304,7 @@ renderPageStart('Manage Payments', 'cashier', 'payments.php');
                 <div class="row">
                     <div class="col-md-6">
                         <table class="table table-borderless">
-                            <tr><th>Permit Number:</th><td><strong><?php echo $receipt_data['permit_number']; ?></strong></td></tr>
+                            <tr><th>Permit Number:</th></td><strong><?php echo $receipt_data['permit_number']; ?></strong></td></tr>
                             <tr><th>Student ID:</th><td><?php echo $receipt_data['student_id']; ?></td></tr>
                             <tr><th>Student Name:</th><td><strong><?php echo $receipt_data['student_name']; ?></strong></td></tr>
                             <tr><th>Payment Type:</th><td><?php echo ucfirst($receipt_data['payment_type']); ?></td></tr>
@@ -548,6 +573,8 @@ new bootstrap.Modal(document.getElementById('receiptModal')).show();
 <div class="card mb-4">
     <div class="card-body">
         <form method="GET" class="row g-3">
+            <input type="hidden" name="page" value="1">
+            <input type="hidden" name="per_page" value="<?php echo $per_page; ?>">
             <div class="col-md-3">
                 <label class="form-label">Status</label>
                 <select class="form-select" name="status">
@@ -572,6 +599,25 @@ new bootstrap.Modal(document.getElementById('receiptModal')).show();
 <!-- Payments Table -->
 <div class="card">
     <div class="card-body">
+        
+        <!-- Per Page Selector - Top Right -->
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
+            <div class="text-muted small mb-2 mb-md-0">
+                Showing <?php echo $offset + 1; ?> to <?php echo min($offset + $per_page, $total_records); ?> of <?php echo $total_records; ?> payments
+            </div>
+            <div>
+                <div class="d-flex align-items-center gap-2">
+                    <label class="text-muted small mb-0">Show:</label>
+                    <select class="form-select form-select-sm" style="width: auto;" onchange="window.location.href=updateQueryStringParameter(window.location.href, 'per_page', this.value)">
+                        <?php foreach ([10, 25, 50, 100] as $option): ?>
+                            <option value="<?php echo $option; ?>" <?php echo $per_page == $option ? 'selected' : ''; ?>><?php echo $option; ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <span class="text-muted small">per page</span>
+                </div>
+            </div>
+        </div>
+        
         <?php if (empty($payments)): ?>
             <div class="text-center py-5">
                 <i class="fas fa-file-invoice-dollar fa-3x text-muted mb-3"></i>
@@ -605,6 +651,69 @@ new bootstrap.Modal(document.getElementById('receiptModal')).show();
                     </tbody>
                 </table>
             </div>
+            
+            <!-- Pagination -->
+            <?php if ($total_pages > 1): ?>
+            <nav class="mt-3">
+                <ul class="pagination justify-content-center flex-wrap">
+                    <!-- First page -->
+                    <?php if ($page > 1): ?>
+                        <li class="page-item"><a class="page-link" href="?page=1&per_page=<?php echo $per_page; ?>&status=<?php echo urlencode($status_filter); ?>&search=<?php echo urlencode($search); ?>">&laquo;&laquo;</a></li>
+                    <?php else: ?>
+                        <li class="page-item disabled"><span class="page-link">&laquo;&laquo;</span></li>
+                    <?php endif; ?>
+                    
+                    <!-- Previous -->
+                    <?php if ($page > 1): ?>
+                        <li class="page-item"><a class="page-link" href="?page=<?php echo $page - 1; ?>&per_page=<?php echo $per_page; ?>&status=<?php echo urlencode($status_filter); ?>&search=<?php echo urlencode($search); ?>">&laquo;</a></li>
+                    <?php else: ?>
+                        <li class="page-item disabled"><span class="page-link">&laquo;</span></li>
+                    <?php endif; ?>
+                    
+                    <!-- Page numbers -->
+                    <?php
+                    $start_page = max(1, $page - 2);
+                    $end_page = min($total_pages, $page + 2);
+                    
+                    if ($start_page > 1): ?>
+                        <li class="page-item"><a class="page-link" href="?page=1&per_page=<?php echo $per_page; ?>&status=<?php echo urlencode($status_filter); ?>&search=<?php echo urlencode($search); ?>">1</a></li>
+                        <?php if ($start_page > 2): ?>
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                    
+                    <?php for ($i = $start_page; $i <= $end_page; $i++): ?>
+                        <?php if ($i == $page): ?>
+                            <li class="page-item active"><span class="page-link"><?php echo $i; ?></span></li>
+                        <?php else: ?>
+                            <li class="page-item"><a class="page-link" href="?page=<?php echo $i; ?>&per_page=<?php echo $per_page; ?>&status=<?php echo urlencode($status_filter); ?>&search=<?php echo urlencode($search); ?>"><?php echo $i; ?></a></li>
+                        <?php endif; ?>
+                    <?php endfor; ?>
+                    
+                    <?php if ($end_page < $total_pages): ?>
+                        <?php if ($end_page < $total_pages - 1): ?>
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                        <?php endif; ?>
+                        <li class="page-item"><a class="page-link" href="?page=<?php echo $total_pages; ?>&per_page=<?php echo $per_page; ?>&status=<?php echo urlencode($status_filter); ?>&search=<?php echo urlencode($search); ?>"><?php echo $total_pages; ?></a></li>
+                    <?php endif; ?>
+                    
+                    <!-- Next -->
+                    <?php if ($page < $total_pages): ?>
+                        <li class="page-item"><a class="page-link" href="?page=<?php echo $page + 1; ?>&per_page=<?php echo $per_page; ?>&status=<?php echo urlencode($status_filter); ?>&search=<?php echo urlencode($search); ?>">&raquo;</a></li>
+                    <?php else: ?>
+                        <li class="page-item disabled"><span class="page-link">&raquo;</span></li>
+                    <?php endif; ?>
+                    
+                    <!-- Last page -->
+                    <?php if ($page < $total_pages): ?>
+                        <li class="page-item"><a class="page-link" href="?page=<?php echo $total_pages; ?>&per_page=<?php echo $per_page; ?>&status=<?php echo urlencode($status_filter); ?>&search=<?php echo urlencode($search); ?>">&raquo;&raquo;</a></li>
+                    <?php else: ?>
+                        <li class="page-item disabled"><span class="page-link">&raquo;&raquo;</span></li>
+                    <?php endif; ?>
+                </ul>
+            </nav>
+            <?php endif; ?>
+            
         <?php endif; ?>
     </div>
 </div>
@@ -752,6 +861,220 @@ document.addEventListener('click', function(e) {
     const search = document.getElementById('student_search');
     if (dropdown && !dropdown.contains(e.target) && e.target !== search) dropdown.style.display = 'none';
 });
+
+// Helper function to update URL parameters
+function updateQueryStringParameter(uri, key, value) {
+    var re = new RegExp("([?&])" + key + "=.*?(&|$)", "i");
+    var separator = uri.indexOf('?') !== -1 ? "&" : "?";
+    if (uri.match(re)) {
+        return uri.replace(re, '$1' + key + "=" + value + '$2');
+    } else {
+        return uri + separator + key + "=" + value;
+    }
+}
+
+// =======================================================
+// ASYNC/AWAIT FUNCTIONS FOR PAYMENTS PAGE
+// =======================================================
+
+// Async function to load payments with filters
+async function loadPayments(page = 1, perPage = null, filters = {}) {
+    try {
+        showPaymentsLoading();
+        
+        const currentPerPage = perPage || document.getElementById('per_page_select')?.value || <?php echo $per_page; ?>;
+        const status = filters.status || document.querySelector('select[name="status"]')?.value || '';
+        const search = filters.search || document.querySelector('input[name="search"]')?.value || '';
+        
+        // Build URL with parameters
+        const url = new URL(window.location.href);
+        url.searchParams.set('page', page);
+        url.searchParams.set('per_page', currentPerPage);
+        if (status) url.searchParams.set('status', status);
+        if (search) url.searchParams.set('search', search);
+        
+        // Fetch data
+        const response = await fetch(url.toString());
+        const html = await response.text();
+        
+        // Parse the HTML response
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        
+        // Extract the payments table container content
+        const newPaymentsContainer = doc.querySelector('.payments-table-container');
+        if (newPaymentsContainer) {
+            document.querySelector('.payments-table-container').innerHTML = newPaymentsContainer.innerHTML;
+        }
+        
+        // Update URL without reloading
+        window.history.pushState({}, '', url.toString());
+        
+        // Re-attach event listeners for payment buttons
+        attachPaymentEventListeners();
+        
+    } catch (error) {
+        console.error('Error loading payments:', error);
+        showPaymentsError('Failed to load payments. Please refresh the page.');
+    } finally {
+        hidePaymentsLoading();
+    }
+}
+
+// Alternative: AJAX version for payments
+async function loadPaymentsAjax(page = 1, perPage = null) {
+    try {
+        showPaymentsLoading();
+        
+        const currentPerPage = perPage || document.getElementById('per_page_select')?.value || <?php echo $per_page; ?>;
+        const status = document.querySelector('select[name="status"]')?.value || '';
+        const search = document.querySelector('input[name="search"]')?.value || '';
+        
+        const formData = new FormData();
+        formData.append('action', 'get_paginated_payments');
+        formData.append('page', page);
+        formData.append('per_page', currentPerPage);
+        formData.append('status', status);
+        formData.append('search', search);
+        
+        const response = await fetch('../admin/ajax_handler.php', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            renderPaymentsTable(data);
+        } else {
+            showPaymentsError(data.message);
+        }
+    } catch (error) {
+        console.error('Error loading payments:', error);
+        showPaymentsError('Failed to load payments');
+    } finally {
+        hidePaymentsLoading();
+    }
+}
+
+// Show payments loading
+function showPaymentsLoading() {
+    const tableContainer = document.querySelector('.payments-table-container');
+    if (tableContainer) {
+        tableContainer.style.opacity = '0.5';
+        tableContainer.style.pointerEvents = 'none';
+    }
+}
+
+// Hide payments loading
+function hidePaymentsLoading() {
+    const tableContainer = document.querySelector('.payments-table-container');
+    if (tableContainer) {
+        tableContainer.style.opacity = '1';
+        tableContainer.style.pointerEvents = 'auto';
+    }
+}
+
+// Show payments error
+function showPaymentsError(message) {
+    const tableContainer = document.querySelector('.payments-table-container');
+    if (tableContainer) {
+        tableContainer.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i> ${escapeHtml(message)}
+                <button class="btn btn-sm btn-outline-danger mt-2" onclick="location.reload()">Retry</button>
+            </div>
+        `;
+    }
+}
+
+// Re-attach payment event listeners after AJAX load
+function attachPaymentEventListeners() {
+    // Record payment buttons
+    document.querySelectorAll('.record-payment-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            recordPayment(
+                this.dataset.id,
+                this.dataset.permit,
+                this.dataset.student,
+                this.dataset.description,
+                this.dataset.amount,
+                this.dataset.balance
+            );
+        });
+    });
+    
+    // Process payment button
+    const processPaymentBtn = document.getElementById('processPaymentBtn');
+    if (processPaymentBtn) {
+        processPaymentBtn.addEventListener('click', toggleProcessPaymentForm);
+    }
+}
+
+// Make sure the existing per_page select triggers async load
+document.addEventListener('DOMContentLoaded', function() {
+    // Override the per_page select onchange to use async
+    const perPageSelect = document.getElementById('per_page_select');
+    if (perPageSelect) {
+        const originalOnChange = perPageSelect.getAttribute('onchange');
+        perPageSelect.removeAttribute('onchange');
+        perPageSelect.addEventListener('change', async (e) => {
+            await loadPayments(1, parseInt(e.target.value));
+        });
+    }
+    
+    // Override filter form to use async
+    const filterForm = document.querySelector('#filterForm, .filter-form');
+    if (filterForm) {
+        filterForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await loadPayments(1);
+        });
+    }
+});
+
+async function testAsyncFunction() {
+    console.log('1️⃣ Async function started');
+    
+    try {
+        console.log('2️⃣ Making API call...');
+        
+        // Use a simpler test endpoint first
+        const response = await fetch('../admin/ajax_handler.php?action=test');
+        console.log('3️⃣ Response status:', response.status);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('4️⃣ Data received:', data);
+        
+        if (data.success) {
+            console.log('✅ Async/Await is WORKING!');
+        } else {
+            console.log('⚠️ API returned:', data.message);
+        }
+        
+    } catch (error) {
+        console.error('❌ Async/Await FAILED:', error.message);
+        console.error('Full error:', error);
+        
+        // Try to see what the actual error is
+        try {
+            const errorResponse = await fetch('../admin/ajax_handler.php?action=test');
+            const errorText = await errorResponse.text();
+            console.error('Server response:', errorText.substring(0, 500));
+        } catch(e) {
+            console.error('Could not fetch error details');
+        }
+    }
+    
+    console.log('5️⃣ Async function completed');
+}
+
+// Call the test
+testAsyncFunction();
 </script>
 
 <?php renderPageEnd(); ?>
