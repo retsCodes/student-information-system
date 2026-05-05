@@ -49,7 +49,7 @@ $stmt = $pdo->query("
 ");
 $students_by_year = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Recent enrollments
+// List of enrollments
 $stmt = $pdo->query("
     SELECT u.user_id, u.name, si.program, si.year_level, si.enrollment_date
     FROM users u
@@ -291,11 +291,11 @@ renderPageStart('Registrar Dashboard', 'registrar', 'dashboard.php');
             </div>
         </div>
 
-        <!-- Recent Enrollments -->
+        <!-- List Enrollments -->
         <div class="col-md-6 mb-4">
             <div class="card shadow-sm">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0"><i class="fas fa-clock me-2"></i>Recent Enrollments</h5>
+                    <h5 class="card-title mb-0"><i class="fas fa-clock me-2"></i>List of Enrollments</h5>
                     <a href="manage_students.php" class="btn btn-sm btn-link">View All</a>
                 </div>
                 <div class="card-body p-0">
@@ -322,7 +322,7 @@ renderPageStart('Registrar Dashboard', 'registrar', 'dashboard.php');
                                 <?php endforeach; ?>
                                 <?php if (empty($recent_enrollments)): ?>
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">No recent enrollments</td>
+                                    <td colspan="5" class="text-center text-muted py-4">No List of enrollments</td>
                                 </tr>
                                 <?php endif; ?>
                             </tbody>

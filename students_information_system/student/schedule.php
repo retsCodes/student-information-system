@@ -9,31 +9,39 @@ $pdo = getDBConnection();
 $user_id = $_SESSION['user_id'];
 
 // Get student basic info
-$stmt = $pdo->prepare("SELECT si.*, u.name, u.email 
-                       FROM students_info si 
-                       JOIN users u ON si.user_id = u.user_id 
-                       WHERE si.user_id = ?");
+$stmt = $pdo->prepare("
+    SELECT si.*, u.name, u.email, c.id as course_id, c.course_code, c.course_name
+    FROM students_info si 
+    JOIN users u ON si.user_id = u.user_id 
+    LEFT JOIN courses c ON si.course_id = c.id
+    WHERE si.user_id = ?
+");
 $stmt->execute([$user_id]);
 $student_info = $stmt->fetch(PDO::FETCH_ASSOC);
 
 // Get current sections for this student
-$stmt = $pdo->prepare("SELECT s.id, s.section_code, s.program, s.year_level, s.semester, s.section_name
-                       FROM sections s
-                       JOIN student_sections ss ON s.id = ss.section_id
-                       WHERE ss.student_id = ? AND s.status = 'active'");
+$stmt = $pdo->prepare("
+    SELECT s.id, s.section_code, s.program, s.year_level, s.semester, s.section_name, s.course_id
+    FROM sections s
+    JOIN student_sections ss ON s.id = ss.section_id
+    WHERE ss.student_id = ? AND s.status = 'active'
+");
 $stmt->execute([$user_id]);
 $current_sections = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get subjects ONLY from assigned sections (via subject_sections)
+// Get subjects from assigned sections (via subject_sections)
 $all_subjects = [];
 $section_subjects = [];
 
 foreach ($current_sections as $section) {
     // Get subjects from this section only
-    $stmt = $pdo->prepare("SELECT sub.* 
-                           FROM subjects sub
-                           JOIN subject_sections ss ON sub.id = ss.subject_id
-                           WHERE ss.section_id = ?");
+    $stmt = $pdo->prepare("
+        SELECT sub.*, subsec.section_id
+        FROM subjects sub
+        JOIN subject_sections subsec ON sub.id = subsec.subject_id
+        WHERE subsec.section_id = ?
+        ORDER BY sub.subject_code
+    ");
     $stmt->execute([$section['id']]);
     $subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
@@ -49,17 +57,49 @@ foreach ($current_sections as $section) {
     }
 }
 
-// Calculate total units from unique subjects
+// Also get directly assigned subjects (if any)
+$stmt = $pdo->prepare("
+    SELECT s.* 
+    FROM subjects s
+    JOIN student_subjects ss ON s.id = ss.subject_id
+    WHERE ss.student_id = ? AND ss.status = 'active'
+");
+$stmt->execute([$user_id]);
+$direct_assigned = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+foreach ($direct_assigned as $subject) {
+    if (!isset($all_subjects[$subject['id']])) {
+        $all_subjects[$subject['id']] = $subject;
+        // Add to a special "direct" section if no section
+        if (!isset($section_subjects['direct'])) {
+            $section_subjects['direct'] = [
+                'section_info' => [
+                    'id' => 'direct',
+                    'section_code' => 'Direct Assignment',
+                    'program' => $student_info['program'] ?? 'N/A',
+                    'year_level' => $student_info['year_level'] ?? 1,
+                    'semester' => '1st',
+                    'section_name' => 'Directly Assigned Subjects'
+                ],
+                'subjects' => []
+            ];
+        }
+        $section_subjects['direct']['subjects'][] = $subject;
+    }
+}
+
+// Calculate total units
 $total_units = array_sum(array_column($all_subjects, 'units'));
-// Build payment status for each exam type
+
+// Build payment status for exam types
 $payment_status = [];
 
-// First, get all exam payments for this student
+// Get all exam payments for this student
 $stmt = $pdo->prepare("
     SELECT description, payment_status, issued_date 
     FROM payments 
     WHERE student_id = ? 
-    AND payment_category = 'exam'
+    AND (payment_category = 'exam' OR description LIKE '%exam%' OR description LIKE '%prelim%' OR description LIKE '%midterm%')
     ORDER BY issued_date DESC
 ");
 $stmt->execute([$user_id]);
@@ -69,17 +109,18 @@ $exam_payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $paid_exams = [];
 foreach ($exam_payments as $payment) {
     $desc = strtolower($payment['description']);
+    $status = $payment['payment_status'];
     if (strpos($desc, 'prelim') !== false) {
-        $paid_exams['prelim'] = $payment['payment_status'];
+        $paid_exams['prelim'] = $status;
     }
     if (strpos($desc, 'midterm') !== false) {
-        $paid_exams['midterm'] = $payment['payment_status'];
+        $paid_exams['midterm'] = $status;
     }
     if (strpos($desc, 'prefinals') !== false) {
-        $paid_exams['prefinals'] = $payment['payment_status'];
+        $paid_exams['prefinals'] = $status;
     }
     if (strpos($desc, 'final') !== false) {
-        $paid_exams['finals'] = $payment['payment_status'];
+        $paid_exams['finals'] = $status;
     }
 }
 
@@ -87,8 +128,8 @@ foreach ($exam_payments as $payment) {
 foreach ($all_subjects as $subject) {
     $subject_id = $subject['id'];
     foreach (['prelim', 'midterm', 'prefinals', 'finals'] as $exam_type) {
-        if (isset($paid_exams[$exam_type]) && $paid_exams[$exam_type] === 'paid') {
-            $payment_status[$subject_id][$exam_type] = 'paid';
+        if (isset($paid_exams[$exam_type]) && ($paid_exams[$exam_type] === 'paid' || $paid_exams[$exam_type] === 'partial')) {
+            $payment_status[$subject_id][$exam_type] = $paid_exams[$exam_type];
         } else {
             $payment_status[$subject_id][$exam_type] = 'unpaid';
         }
@@ -98,14 +139,16 @@ foreach ($all_subjects as $subject) {
 // Get class schedule
 $class_schedule = [];
 try {
-    $stmt = $pdo->prepare("SELECT cs.*, s.subject_code, s.subject_name, sec.section_code
-                           FROM class_schedule cs
-                           JOIN subjects s ON cs.subject_id = s.id
-                           JOIN sections sec ON cs.section_id = sec.id
-                           WHERE cs.section_id IN (
-                               SELECT section_id FROM student_sections WHERE student_id = ?
-                           )
-                           ORDER BY FIELD(cs.day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'), cs.start_time");
+    $stmt = $pdo->prepare("
+        SELECT cs.*, s.subject_code, s.subject_name, sec.section_code
+        FROM class_schedule cs
+        JOIN subjects s ON cs.subject_id = s.id
+        JOIN sections sec ON cs.section_id = sec.id
+        WHERE cs.section_id IN (
+            SELECT section_id FROM student_sections WHERE student_id = ?
+        )
+        ORDER BY FIELD(cs.day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'), cs.start_time
+    ");
     $stmt->execute([$user_id]);
     $class_schedule = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Exception $e) {
@@ -166,6 +209,14 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
     color: white;
     border: none;
 }
+.payment-status-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+}
+.subject-badge {
+    font-size: 12px;
+    padding: 2px 6px;
+}
 </style>
 
 <div class="container-fluid">
@@ -176,19 +227,17 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                 <div class="card-body">
                     <div class="row align-items-center">
                         <div class="col-md-8">
-                            <h3 class="card-title mb-1"><?php echo htmlspecialchars($student_info['name']); ?></h3>
+                            <h3 class="card-title mb-1"><?php echo htmlspecialchars($student_info['name'] ?? 'Student'); ?></h3>
                             <p class="card-text mb-1">
                                 <strong>Student ID:</strong> <?php echo htmlspecialchars($user_id); ?> | 
                                 <strong>Program:</strong> <?php echo htmlspecialchars($student_info['program'] ?? 'Not Set'); ?> | 
                                 <strong>Year Level:</strong> <?php echo $student_info['year_level'] ?? 'Not Set'; ?>
                             </p>
+                            <?php if (!empty($student_info['course_code'])): ?>
                             <p class="card-text mb-0">
-                                <strong>Student Type:</strong> 
-                                <span class="badge bg-<?php echo ($student_info['student_type'] ?? 'regular') === 'regular' ? 'success' : 'warning'; ?>">
-                                    <?php echo ucfirst($student_info['student_type'] ?? 'regular'); ?>
-                                </span> | 
-                                <strong>Email:</strong> <?php echo htmlspecialchars($student_info['email']); ?>
+                                <strong>Course:</strong> <?php echo htmlspecialchars($student_info['course_code'] . ' - ' . ($student_info['course_name'] ?? '')); ?>
                             </p>
+                            <?php endif; ?>
                         </div>
                         <div class="col-md-4 text-end">
                             <div class="display-4 fw-bold"><?php echo $total_units; ?></div>
@@ -245,6 +294,7 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                         <i class="fas fa-book-open fa-3x text-muted mb-3"></i>
                         <h4>No Study Load Assigned</h4>
                         <p class="text-muted">You are not currently enrolled in any sections or subjects.</p>
+                        <p class="text-muted small">Please contact your registrar for enrollment assistance.</p>
                     </div>
                 </div>
             <?php else: ?>
@@ -295,8 +345,8 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                                                 <?php echo htmlspecialchars($subject['subject_name']); ?>
                                             </h6>
                                             
-                                            <?php if ($subject['description']): ?>
-                                                <p class="text-muted small mb-2"><?php echo htmlspecialchars($subject['description']); ?></p>
+                                            <?php if (!empty($subject['description'])): ?>
+                                                <p class="text-muted small mb-2"><?php echo htmlspecialchars(substr($subject['description'], 0, 100)); ?></p>
                                             <?php endif; ?>
 
                                             <!-- Exam Payment Status -->
@@ -305,7 +355,10 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                                                 <div class="payment-grid">
                                                     <?php 
                                                     $types = ['prelim', 'midterm', 'prefinals', 'finals'];
-                                                    foreach($types as $type): 
+                                                    $type_labels = ['Prelim', 'Midterm', 'Prefinals', 'Finals'];
+                                                    for($i = 0; $i < count($types); $i++):
+                                                        $type = $types[$i];
+                                                        $label = $type_labels[$i];
                                                         $status = isset($payment_status[$subject['id']][$type]) ? $payment_status[$subject['id']][$type] : 'unpaid';
                                                         $badge_class = match($status) {
                                                             'paid' => 'success',
@@ -315,12 +368,12 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                                                         };
                                                     ?>
                                                         <div class="text-center">
-                                                            <small class="d-block text-muted"><?php echo ucfirst($type); ?></small>
-                                                            <span class="badge bg-<?php echo $badge_class; ?> payment-status-badge">
+                                                            <small class="d-block text-muted"><?php echo $label; ?></small>
+                                                            <span class="badge bg-<?php echo $badge_class; ?> payment-status-badge w-100">
                                                                 <?php echo ucfirst($status); ?>
                                                             </span>
                                                         </div>
-                                                    <?php endforeach; ?>
+                                                    <?php endfor; ?>
                                                 </div>
                                             </div>
                                         </div>
@@ -347,10 +400,11 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                     <?php if (empty($class_schedule)): ?>
                         <div class="text-center py-3">
                             <i class="fas fa-clock fa-2x text-muted mb-2"></i>
-                            <p class="text-muted mb-0">Class schedule not available</p>
+                            <p class="text-muted mb-0">No class schedule available</p>
+                            <p class="text-muted small mt-2">Schedule will appear once sections and subjects are assigned.</p>
                         </div>
                     <?php else: ?>
-                        <div class="schedule-container">
+                        <div class="schedule-container" style="max-height: 500px; overflow-y: auto;">
                             <?php foreach($schedule_by_day as $day => $classes): ?>
                                 <?php if (!empty($classes)): ?>
                                     <div class="mb-3">
@@ -358,16 +412,19 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                                         <?php foreach($classes as $class): ?>
                                             <div class="schedule-slot">
                                                 <div class="d-flex justify-content-between align-items-start">
-                                                    <div>
+                                                    <div class="flex-grow-1">
                                                         <strong class="d-block"><?php echo htmlspecialchars($class['subject_code']); ?></strong>
-                                                        <small class="text-muted"><?php echo htmlspecialchars($class['subject_name']); ?></small>
+                                                        <small class="text-muted d-block"><?php echo htmlspecialchars($class['subject_name']); ?></small>
+                                                        <small class="text-muted d-block">Room: <?php echo htmlspecialchars($class['room'] ?? 'TBA'); ?></small>
                                                     </div>
-                                                    <div class="text-end">
-                                                        <small class="text-primary fw-bold">
-                                                            <?php echo date('g:i A', strtotime($class['start_time'])); ?> - 
-                                                            <?php echo date('g:i A', strtotime($class['end_time'])); ?>
-                                                        </small><br>
-                                                        <small class="text-muted"><?php echo htmlspecialchars($class['room'] ?? 'TBA'); ?></small>
+                                                    <div class="text-end ms-2">
+                                                        <small class="text-primary fw-bold d-block">
+                                                            <?php echo date('g:i A', strtotime($class['start_time'])); ?>
+                                                        </small>
+                                                        <small class="text-primary fw-bold d-block">
+                                                            - <?php echo date('g:i A', strtotime($class['end_time'])); ?>
+                                                        </small>
+                                                        <small class="text-muted"><?php echo htmlspecialchars($class['section_code']); ?></small>
                                                     </div>
                                                 </div>
                                             </div>
@@ -402,8 +459,18 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
                     </div>
                     <div class="mb-3">
                         <strong>Student Status:</strong>
-                        <span class="float-end badge bg-<?php echo ($student_info['student_type'] ?? 'regular') === 'regular' ? 'success' : 'warning'; ?>">
-                            <?php echo ucfirst($student_info['student_type'] ?? 'regular'); ?>
+                        <span class="float-end">
+                            <span class="badge bg-<?php echo ($student_info['student_type'] ?? 'regular') === 'regular' ? 'success' : 'warning'; ?>">
+                                <?php echo ucfirst($student_info['student_type'] ?? 'regular'); ?>
+                            </span>
+                        </span>
+                    </div>
+                    <div class="mb-3">
+                        <strong>Enrollment Status:</strong>
+                        <span class="float-end">
+                            <span class="badge bg-<?php echo ($student_info['enrollment_status'] ?? 'enrolled') === 'enrolled' ? 'success' : 'danger'; ?>">
+                                <?php echo ucfirst($student_info['enrollment_status'] ?? 'Enrolled'); ?>
+                            </span>
                         </span>
                     </div>
                     <hr>
@@ -416,16 +483,22 @@ renderPageStart('My Study Load & Schedule', 'student', 'schedule.php');
 
             <!-- Payment Legend -->
             <div class="card shadow mt-4">
+                <div class="card-header bg-secondary text-white">
+                    <h6 class="card-title mb-0">Exam Payment Status Legend</h6>
+                </div>
                 <div class="card-body">
-                    <h6 class="card-title">Exam Payment Status Legend:</h6>
                     <div class="d-flex flex-column gap-2">
-                        <div>
+                        <div class="d-flex align-items-center justify-content-between">
                             <span class="badge bg-success payment-status-badge">Paid</span>
-                            <small class="text-muted ms-1">Exam fee fully paid</small>
+                            <small class="text-muted ms-2">Exam fee fully paid</small>
                         </div>
-                        <div>
+                        <div class="d-flex align-items-center justify-content-between">
+                            <span class="badge bg-warning payment-status-badge">Partial</span>
+                            <small class="text-muted ms-2">Partial payment made</small>
+                        </div>
+                        <div class="d-flex align-items-center justify-content-between">
                             <span class="badge bg-danger payment-status-badge">Unpaid</span>
-                            <small class="text-muted ms-1">Exam fee not yet paid</small>
+                            <small class="text-muted ms-2">Exam fee not yet paid</small>
                         </div>
                     </div>
                 </div>

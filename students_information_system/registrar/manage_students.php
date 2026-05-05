@@ -49,7 +49,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     try {
                         $pdo->beginTransaction();
                         
-                        // Check if student exists, if not create basic record
                         $stmt = $pdo->prepare("SELECT * FROM users WHERE user_id = ? AND role = 'student'");
                         $stmt->execute([$student_id]);
                         $student = $stmt->fetch();
@@ -58,18 +57,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $error = 'Student not found. Please add the student first.';
                             $pdo->rollBack();
                         } else {
-                            // Update students_info
                             $stmt = $pdo->prepare("UPDATE students_info SET program = ?, year_level = ?, enrollment_status = 'enrolled', enrollment_date = CURDATE() WHERE user_id = ?");
                             $stmt->execute([$program, $year_level, $student_id]);
                             
-                            // Clear existing sections and subjects
                             $stmt = $pdo->prepare("DELETE FROM student_sections WHERE student_id = ?");
                             $stmt->execute([$student_id]);
                             
                             $stmt = $pdo->prepare("DELETE FROM student_subjects WHERE student_id = ?");
                             $stmt->execute([$student_id]);
                             
-                            // Assign sections
                             $stmt = $pdo->prepare("INSERT INTO student_sections (student_id, section_id) VALUES (?, ?)");
                             foreach ($section_ids as $sid) {
                                 $sid = intval($sid);
@@ -78,12 +74,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                 }
                             }
                             
-                            // Determine student type
                             $student_type = count($section_ids) > 1 ? 'irregular' : 'regular';
                             $stmt = $pdo->prepare("UPDATE students_info SET student_type = ? WHERE user_id = ?");
                             $stmt->execute([$student_type, $student_id]);
                             
-                            // Assign subjects
                             if (!empty($subject_ids)) {
                                 $assign_stmt = $pdo->prepare("
                                     INSERT INTO student_subjects (student_id, subject_id, section_id, assigned_by, reason, status)
@@ -105,27 +99,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         if ($pdo->inTransaction()) $pdo->rollBack();
                         $error = 'Failed to enroll student: ' . $e->getMessage();
                     }
-                }
-                break;
-                
-            case 'update_student_info':
-                $student_id = sanitizeInput($_POST['student_id'] ?? '');
-                $name = sanitizeInput($_POST['name'] ?? '');
-                $email = sanitizeInput($_POST['email'] ?? '');
-                $program = sanitizeInput($_POST['program'] ?? '');
-                $year_level = intval($_POST['year_level'] ?? 0);
-                
-                try {
-                    $stmt = $pdo->prepare("UPDATE users SET name = ?, email = ? WHERE user_id = ?");
-                    $stmt->execute([$name, $email, $student_id]);
-                    
-                    $stmt = $pdo->prepare("UPDATE students_info SET program = ?, year_level = ? WHERE user_id = ?");
-                    $stmt->execute([$program, $year_level, $student_id]);
-                    
-                    logActivity($_SESSION['user_id'], 'Student Info Updated', "Updated information for student {$student_id}");
-                    $success = "Student information updated successfully.";
-                } catch (Exception $e) {
-                    $error = 'Failed to update student: ' . $e->getMessage();
                 }
                 break;
                 
@@ -186,7 +159,7 @@ if (!empty($search)) {
 $where_clause = !empty($where) ? 'WHERE ' . implode(' AND ', $where) . ' AND u.role = "student"' : 'WHERE u.role = "student"';
 
 // Pagination
-$per_page = 20;
+$per_page = 15;
 $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
 $offset = ($page - 1) * $per_page;
 
@@ -206,46 +179,35 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $students = $stmt->fetchAll();
 
-// Map for student sections and subjects
+// Map for student sections
 $student_sections_map = [];
-$student_subjects_map = [];
-
 $stmt = $pdo->query("SELECT student_id, section_id FROM student_sections");
 while ($row = $stmt->fetch()) {
     $student_sections_map[$row['student_id']][] = $row['section_id'];
-}
-
-$stmt = $pdo->query("
-    SELECT ss.student_id, s.id, s.subject_code, s.subject_name, s.units, scc.grade, scc.status as completion_status
-    FROM student_subjects ss
-    JOIN subjects s ON ss.subject_id = s.id
-    LEFT JOIN student_course_completion scc ON scc.student_id = ss.student_id AND scc.subject_id = ss.subject_id
-    WHERE ss.status = 'active'
-");
-while ($row = $stmt->fetch()) {
-    if (!isset($student_subjects_map[$row['student_id']])) {
-        $student_subjects_map[$row['student_id']] = [];
-    }
-    $student_subjects_map[$row['student_id']][] = $row;
 }
 
 renderPageStart('Manage Students', 'registrar', 'manage_students.php');
 ?>
 
 <style>
-.student-card {
-    transition: all 0.3s ease;
-    border: 1px solid #e9ecef;
+.student-table th {
+    background-color: #f8f9fa;
+    white-space: nowrap;
 }
-.student-card:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    transform: translateY(-2px);
+.student-table td {
+    vertical-align: middle;
+}
+.student-table .actions {
+    white-space: nowrap;
+    width: 180px;
 }
 .section-badge {
     background: #e9ecef;
-    padding: 4px 8px;
+    padding: 2px 6px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 11px;
+    display: inline-block;
+    margin: 2px;
 }
 .enrollment-modal .modal-xl {
     max-width: 1200px;
@@ -275,13 +237,32 @@ renderPageStart('Manage Students', 'registrar', 'manage_students.php');
     border-color: #28a745;
     background: #f0fff4;
 }
+.pagination {
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.pagination .page-item {
+    margin: 2px;
+}
+@media (max-width: 768px) {
+    .pagination {
+        justify-content: center;
+    }
+    .student-table {
+        font-size: 13px;
+    }
+    .student-table .actions {
+        white-space: normal;
+    }
+}
 </style>
 
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2><i class="fas fa-user-graduate me-2"></i>Student Management</h2>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#enrollStudentModal">
-            <i class="fas fa-plus"></i> Enroll Student
+        <!-- Bulk Upload Button -->
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#bulkGradeUploadModal">
+            <i class="fas fa-file-csv me-1"></i> Bulk Upload Grades
         </button>
     </div>
 
@@ -305,8 +286,9 @@ renderPageStart('Manage Students', 'registrar', 'manage_students.php');
             <h6 class="mb-0"><i class="fas fa-filter me-2"></i>Filter Students</h6>
         </div>
         <div class="card-body">
-            <form method="GET" class="row g-3">
-                <div class="col-md-4">
+            <form method="GET" id="filterForm" class="row g-3">
+                <input type="hidden" name="page" value="1">
+                <div class="col-md-3">
                     <label class="form-label">Program</label>
                     <select class="form-select" name="program">
                         <option value="">All Programs</option>
@@ -317,7 +299,7 @@ renderPageStart('Manage Students', 'registrar', 'manage_students.php');
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label">Year Level</label>
                     <select class="form-select" name="year_level">
                         <option value="">All Years</option>
@@ -328,9 +310,12 @@ renderPageStart('Manage Students', 'registrar', 'manage_students.php');
                 </div>
                 <div class="col-md-5">
                     <label class="form-label">Search</label>
-                    <div class="input-group">
-                        <input type="text" class="form-control" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="ID, Name, or Email...">
-                        <button type="submit" class="btn btn-primary"><i class="fas fa-search"></i> Filter</button>
+                    <input type="text" class="form-control" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="ID, Name, or Email...">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">&nbsp;</label>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary flex-grow-1"><i class="fas fa-search"></i> Filter</button>
                         <a href="manage_students.php" class="btn btn-secondary"><i class="fas fa-undo"></i> Clear</a>
                     </div>
                 </div>
@@ -338,119 +323,237 @@ renderPageStart('Manage Students', 'registrar', 'manage_students.php');
         </div>
     </div>
 
-    <!-- Students List -->
-    <div class="row">
-        <?php if (empty($students)): ?>
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-body text-center py-5">
-                        <i class="fas fa-users fa-3x text-muted mb-3"></i>
-                        <h5>No Students Found</h5>
-                        <p class="text-muted">Click "Enroll Student" to add new students.</p>
-                    </div>
+    <!-- Students Table -->
+    <div class="card">
+        <div class="card-header bg-white">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Student List</h5>
+                <div class="text-muted small">
+                    Showing <?php echo $offset + 1; ?> to <?php echo min($offset + $per_page, $total_records); ?> of <?php echo $total_records; ?> students
                 </div>
             </div>
-        <?php else: ?>
-            <?php foreach ($students as $student): 
-                $student_sections = $student_sections_map[$student['user_id']] ?? [];
-                $student_subjects = $student_subjects_map[$student['user_id']] ?? [];
-            ?>
-                <div class="col-md-6 col-lg-4 mb-4">
-                    <div class="card student-card h-100">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-start mb-3">
-                                <div>
-                                    <h5 class="card-title mb-0"><?php echo htmlspecialchars($student['name']); ?></h5>
-                                    <code class="text-muted small"><?php echo htmlspecialchars($student['user_id']); ?></code>
-                                </div>
-                                <span class="badge bg-<?php echo $student['student_type'] === 'regular' ? 'success' : 'warning'; ?>">
-                                    <?php echo ucfirst($student['student_type']); ?>
-                                </span>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <div><i class="fas fa-graduation-cap text-muted me-2"></i><?php echo htmlspecialchars($student['program']); ?></div>
-                                <div><i class="fas fa-calendar-alt text-muted me-2"></i>Year <?php echo $student['year_level']; ?></div>
-                                <div><i class="fas fa-envelope text-muted me-2"></i><?php echo htmlspecialchars($student['email']); ?></div>
-                                <div><i class="fas fa-flag-checkered text-muted me-2"></i><?php echo ucfirst($student['enrollment_status']); ?></div>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <strong>Sections:</strong>
-                                <div class="mt-1">
-                                    <?php 
-                                    $section_codes = [];
-                                    if (!empty($student_sections)) {
-                                        $placeholders = str_repeat('?,', count($student_sections) - 1) . '?';
-                                        $stmt = $pdo->prepare("SELECT section_code FROM sections WHERE id IN ($placeholders)");
-                                        $stmt->execute($student_sections);
-                                        $section_codes = $stmt->fetchAll(PDO::FETCH_COLUMN);
-                                    }
-                                    if (!empty($section_codes)):
-                                        foreach ($section_codes as $code):
-                                    ?>
-                                        <span class="section-badge d-inline-block me-1 mb-1"><?php echo htmlspecialchars($code); ?></span>
-                                    <?php 
-                                        endforeach;
-                                    else:
-                                    ?>
-                                        <span class="text-muted">No sections assigned</span>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <strong>Subjects:</strong>
-                                <div class="mt-1">
-                                    <?php if (!empty($student_subjects)): ?>
-                                        <?php foreach ($student_subjects as $subject): ?>
-                                            <span class="badge bg-info me-1 mb-1"><?php echo htmlspecialchars($subject['subject_code']); ?></span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover student-table mb-0">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Student ID</th>
+                            <th>Name</th>
+                            <th>Program</th>
+                            <th>Year</th>
+                            <th>Type</th>
+                            <th>Sections</th>
+                            <th>Status</th>
+                            <th class="actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studentsTableBody">
+                        <?php 
+                        $counter = $offset + 1;
+                        foreach ($students as $student): 
+                            $student_sections = $student_sections_map[$student['user_id']] ?? [];
+                            $section_codes = [];
+                            if (!empty($student_sections)) {
+                                $placeholders = str_repeat('?,', count($student_sections) - 1) . '?';
+                                $stmt = $pdo->prepare("SELECT section_code FROM sections WHERE id IN ($placeholders)");
+                                $stmt->execute($student_sections);
+                                $section_codes = $stmt->fetchAll(PDO::FETCH_COLUMN);
+                            }
+                        ?>
+                            <tr>
+                                <td class="text-center"><?php echo $counter++; ?></td>
+                                <td><code><?php echo htmlspecialchars($student['user_id']); ?></code></td>
+                                <td><strong><?php echo htmlspecialchars($student['name']); ?></strong><br>
+                                    <small class="text-muted"><?php echo htmlspecialchars($student['email']); ?></small>
+                                </span></td>
+                                <td><?php echo htmlspecialchars($student['program']); ?></td>
+                                <td><span class="badge bg-secondary">Year <?php echo $student['year_level']; ?></span></td>
+                                <td>
+                                    <span class="badge bg-<?php echo $student['student_type'] === 'regular' ? 'success' : 'warning'; ?>">
+                                        <?php echo ucfirst($student['student_type']); ?>
+                                    </span>
+                                 </span></td>
+                                <td>
+                                    <?php if (!empty($section_codes)): ?>
+                                        <?php foreach ($section_codes as $code): ?>
+                                            <span class="section-badge"><?php echo htmlspecialchars($code); ?></span>
                                         <?php endforeach; ?>
                                     <?php else: ?>
-                                        <span class="text-muted">No subjects assigned</span>
+                                        <span class="text-muted">—</span>
                                     <?php endif; ?>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="card-footer bg-transparent">
-                            <div class="btn-group w-100">
-                                <button class="btn btn-sm btn-outline-info" onclick="viewStudentDetails('<?php echo htmlspecialchars($student['user_id']); ?>')">
-                                    <i class="fas fa-eye"></i> Details
-                                </button>
-                                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#enrollStudentModal" 
-                                        onclick="prepareEnrollModal('<?php echo htmlspecialchars($student['user_id']); ?>', '<?php echo htmlspecialchars($student['name']); ?>', '<?php echo htmlspecialchars($student['program']); ?>', <?php echo $student['year_level']; ?>, <?php echo json_encode($student_sections); ?>)">
-                                    <i class="fas fa-edit"></i> Enroll
-                                </button>
-                                <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#editGradesModal"
-                                        onclick="prepareGradesModal('<?php echo htmlspecialchars($student['user_id']); ?>', '<?php echo htmlspecialchars($student['name']); ?>')">
-                                    <i class="fas fa-chart-line"></i> Grades
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            <?php endforeach; ?>
+                                 </span></td>
+                                <td>
+                                    <span class="badge bg-<?php echo $student['enrollment_status'] === 'enrolled' ? 'success' : 'secondary'; ?>">
+                                        <?php echo ucfirst($student['enrollment_status']); ?>
+                                    </span>
+                                 </span></td>
+                                <td class="actions">
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-outline-info" onclick="viewStudentDetails('<?php echo htmlspecialchars($student['user_id']); ?>')" title="View Details">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#enrollStudentModal" 
+                                                onclick="prepareEnrollModal('<?php echo htmlspecialchars($student['user_id']); ?>', '<?php echo htmlspecialchars($student['name']); ?>', '<?php echo htmlspecialchars($student['program']); ?>', <?php echo $student['year_level']; ?>, <?php echo json_encode($student_sections); ?>)"
+                                                title="Enroll/Edit">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#editGradesModal"
+                                                onclick="prepareGradesModal('<?php echo htmlspecialchars($student['user_id']); ?>', '<?php echo htmlspecialchars($student['name']); ?>')"
+                                                title="Manage Grades">
+                                            <i class="fas fa-chart-line"></i>
+                                        </button>
+                                    </div>
+                                 </span></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (empty($students)): ?>
+                            <tr>
+                                <td colspan="9" class="text-center py-5">
+                                    <i class="fas fa-users fa-2x text-muted mb-3"></i>
+                                    <p class="mb-0">No students found</p>
+                                 </span></td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <?php if ($total_pages > 1): ?>
+            <div class="card-footer bg-white">
+                <nav>
+                    <ul class="pagination justify-content-center mb-0">
+                        <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
+                            <a class="page-link" href="?page=1&program=<?php echo urlencode($program_filter); ?>&year_level=<?php echo urlencode($year_filter); ?>&search=<?php echo urlencode($search); ?>">&laquo;&laquo;</a>
+                        </li>
+                        <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
+                            <a class="page-link" href="?page=<?php echo $page - 1; ?>&program=<?php echo urlencode($program_filter); ?>&year_level=<?php echo urlencode($year_filter); ?>&search=<?php echo urlencode($search); ?>">&laquo;</a>
+                        </li>
+                        <?php 
+                        $start_page = max(1, $page - 2);
+                        $end_page = min($total_pages, $page + 2);
+                        
+                        if ($start_page > 1): ?>
+                            <li class="page-item"><a class="page-link" href="?page=1&program=<?php echo urlencode($program_filter); ?>&year_level=<?php echo urlencode($year_filter); ?>&search=<?php echo urlencode($search); ?>">1</a></li>
+                            <?php if ($start_page > 2): ?>
+                                <li class="page-item disabled"><span class="page-link">...</span></li>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                        
+                        <?php for ($i = $start_page; $i <= $end_page; $i++): ?>
+                            <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
+                                <a class="page-link" href="?page=<?php echo $i; ?>&program=<?php echo urlencode($program_filter); ?>&year_level=<?php echo urlencode($year_filter); ?>&search=<?php echo urlencode($search); ?>"><?php echo $i; ?></a>
+                            </li>
+                        <?php endfor; ?>
+                        
+                        <?php if ($end_page < $total_pages): ?>
+                            <?php if ($end_page < $total_pages - 1): ?>
+                                <li class="page-item disabled"><span class="page-link">...</span></li>
+                            <?php endif; ?>
+                            <li class="page-item"><a class="page-link" href="?page=<?php echo $total_pages; ?>&program=<?php echo urlencode($program_filter); ?>&year_level=<?php echo urlencode($year_filter); ?>&search=<?php echo urlencode($search); ?>"><?php echo $total_pages; ?></a></li>
+                        <?php endif; ?>
+                        
+                        <li class="page-item <?php echo $page >= $total_pages ? 'disabled' : ''; ?>">
+                            <a class="page-link" href="?page=<?php echo $page + 1; ?>&program=<?php echo urlencode($program_filter); ?>&year_level=<?php echo urlencode($year_filter); ?>&search=<?php echo urlencode($search); ?>">&raquo;</a>
+                        </li>
+                        <li class="page-item <?php echo $page >= $total_pages ? 'disabled' : ''; ?>">
+                            <a class="page-link" href="?page=<?php echo $total_pages; ?>&program=<?php echo urlencode($program_filter); ?>&year_level=<?php echo urlencode($year_filter); ?>&search=<?php echo urlencode($search); ?>">&raquo;&raquo;</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
         <?php endif; ?>
     </div>
+</div>
 
-    <!-- Pagination -->
-    <?php if ($total_pages > 1): ?>
-        <nav class="mt-4">
-            <ul class="pagination justify-content-center">
-                <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>">&laquo;</a>
-                </li>
-                <?php for ($i = max(1, $page - 2); $i <= min($total_pages, $page + 2); $i++): ?>
-                    <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                        <a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['page' => $i])); ?>"><?php echo $i; ?></a>
-                    </li>
-                <?php endfor; ?>
-                <li class="page-item <?php echo $page >= $total_pages ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>">&raquo;</a>
-                </li>
-            </ul>
-        </nav>
-    <?php endif; ?>
+<!-- Bulk Grade Upload Modal -->
+<div class="modal fade" id="bulkGradeUploadModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="fas fa-file-csv me-2"></i>Bulk Grade Upload</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info small">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>CSV Format Instructions:</strong><br>
+                    - <strong>Column A:</strong> Student ID<br>
+                    - <strong>Column B:</strong> Student Name<br>
+                    - <strong>Column C:</strong> Subject Code<br>
+                    - <strong>Column D:</strong> Grade<br>
+                    - <strong>Column E:</strong> Subject Name (optional)<br>
+                    - <strong>Column F:</strong> Year Level (optional)<br>
+                    - <strong>Column G:</strong> Semester (optional)<br>
+                    
+                    <div class="mt-2">
+                        <button type="button" class="btn btn-sm btn-outline-info" id="downloadBsit1aTemplate">
+                            <i class="fas fa-download me-1"></i> Download BSIT 1A Template
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="downloadGenericTemplate">
+                            <i class="fas fa-download me-1"></i> Download Generic Template
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Select Section (Optional)</label>
+                        <select class="form-select" id="bulk_section_id">
+                            <option value="">-- Select Section (optional) --</option>
+                            <?php
+                            $sections_list = $pdo->query("
+                                SELECT s.id, s.section_code, s.program, s.year_level,
+                                       CONCAT(s.section_code, ' - ', s.program, ' (Year ', s.year_level, ')') AS section_label
+                                FROM sections s
+                                WHERE s.status = 'active'
+                                ORDER BY s.program, s.year_level, s.section_code
+                            ")->fetchAll();
+                            foreach ($sections_list as $sec):
+                            ?>
+                                <option value="<?php echo $sec['id']; ?>" data-code="<?php echo htmlspecialchars($sec['section_code']); ?>">
+                                    <?php echo htmlspecialchars($sec['section_label']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-text">Select section to filter template students</div>
+                    </div>
+                </div>
+                
+                <form id="bulkGradeUploadForm" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
+                    <input type="hidden" name="action" value="upload_grades_bulk">
+                    <input type="hidden" name="section_id" id="upload_section_id" value="0">
+                    
+                    <div class="row align-items-end">
+                        <div class="col-md-8">
+                            <label class="form-label">Select CSV File</label>
+                            <input type="file" class="form-control" id="bulk_csv_file" name="csv_file" accept=".csv" required>
+                            <div class="form-text">Maximum file size: 5MB. Only .csv files accepted.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <button type="submit" class="btn btn-success w-100" id="uploadGradesBtn">
+                                <i class="fas fa-upload me-1"></i> Upload & Process
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="bulkUploadProgress" style="display: none;" class="mt-3">
+                        <div class="progress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                        </div>
+                        <p class="small text-muted mt-1" id="bulkUploadStatus">Processing...</p>
+                    </div>
+                </form>
+                
+                <div id="bulkUploadResult" class="mt-3" style="display: none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Enroll Student Modal -->
@@ -567,80 +670,139 @@ renderPageStart('Manage Students', 'registrar', 'manage_students.php');
     </div>
 </div>
 
-<!-- Edit Grades Modal -->
+<!-- Edit Grades Modal with CSV Upload -->
 <div class="modal fade" id="editGradesModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content">
-            <form method="POST" id="gradeForm">
-                <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-                <input type="hidden" name="action" value="update_grade">
-                <input type="hidden" name="student_id" id="grade_student_id">
-                
-                <div class="modal-header bg-success text-white">
-                    <h5 class="modal-title"><i class="fas fa-chart-line me-2"></i>Manage Grades</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="alert alert-info mb-3" id="gradeStudentInfo"></div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">Academic Year</label>
-                        <input type="text" class="form-control" name="academic_year" value="2024-2025" required>
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="fas fa-chart-line me-2"></i>Manage Student Grades</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="grade_student_id">
+                <input type="hidden" id="grade_student_name">
+
+                <div class="alert alert-info mb-3" id="gradeStudentInfo"></div>
+
+                <!-- CSV Bulk Upload Section -->
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0 text-success"><i class="fas fa-file-csv me-2"></i>Bulk Grade Upload (CSV)</h6>
+                        <button class="btn btn-sm btn-outline-success" type="button" data-bs-toggle="collapse" data-bs-target="#csvUploadCollapse">
+                            <i class="fas fa-upload me-1"></i> Upload CSV File
+                        </button>
                     </div>
                     
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Subject</label>
-                            <select class="form-select" name="subject_id" id="grade_subject_id" required>
-                                <option value="">Select Subject</option>
-                                <?php foreach ($subjects as $subject): ?>
-                                    <option value="<?php echo $subject['id']; ?>"><?php echo htmlspecialchars($subject['subject_code'] . ' - ' . $subject['subject_name']); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="col-md-3 mb-3">
-                            <label class="form-label">Year Level</label>
-                            <select class="form-select" name="year_level" id="grade_year_level" required>
-                                <option value="">Select Year</option>
-                                <?php for ($i = 1; $i <= 4; $i++): ?>
-                                    <option value="<?php echo $i; ?>">Year <?php echo $i; ?></option>
-                                <?php endfor; ?>
-                            </select>
-                        </div>
-                        <div class="col-md-3 mb-3">
-                            <label class="form-label">Semester</label>
-                            <select class="form-select" name="semester" required>
-                                <option value="1st">1st Semester</option>
-                                <option value="2nd">2nd Semester</option>
-                                <option value="summer">Summer</option>
-                            </select>
+                    <div class="collapse" id="csvUploadCollapse">
+                        <div class="card card-body bg-light">
+                            <div class="alert alert-info small">
+                                <i class="fas fa-info-circle me-2"></i>
+                                <strong>CSV Format Instructions:</strong><br>
+                                - <strong>Column A:</strong> Subject Code (e.g., IT101, CS201, GE101)<br>
+                                - <strong>Column B:</strong> Grade (e.g., 1.25, 2.0, 3.0, 5.0, or letter grades A, B, C, D, F, P)<br>
+                                - <strong>Column C:</strong> Year Level (1, 2, 3, 4) - Default: 1<br>
+                                - <strong>Column D:</strong> Semester (1st, 2nd, summer) - Default: 1st<br>
+                                - <strong>Column E:</strong> Academic Year (e.g., 2024-2025) - Optional<br>
+                                <a href="#" id="downloadCsvTemplate" class="mt-2 d-inline-block">
+                                    <i class="fas fa-download me-1"></i> Download CSV Template
+                                </a>
+                            </div>
+                            
+                            <form id="csvUploadForm" enctype="multipart/form-data">
+                                <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
+                                <input type="hidden" name="action" value="upload_grades_csv">
+                                <input type="hidden" name="student_id" id="csv_student_id">
+                                
+                                <div class="row align-items-end">
+                                    <div class="col-md-8">
+                                        <label class="form-label">Select CSV File</label>
+                                        <input type="file" class="form-control" id="csv_file" name="csv_file" accept=".csv" required>
+                                        <div class="form-text">Maximum file size: 5MB. Only .csv files accepted.</div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button type="submit" class="btn btn-success w-100" id="uploadCsvBtn">
+                                            <i class="fas fa-upload me-1"></i> Upload & Process
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div id="csvUploadProgress" style="display: none;" class="mt-3">
+                                    <div class="progress">
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                                    </div>
+                                    <p class="small text-muted mt-1" id="csvUploadStatus">Processing...</p>
+                                </div>
+                            </form>
+                            
+                            <div id="csvUploadResult" class="mt-3" style="display: none;"></div>
                         </div>
                     </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">Grade</label>
-                        <select class="form-select" name="grade" required>
-                            <option value="">Select Grade</option>
-                            <option value="1.00">1.00 - Excellent</option>
-                            <option value="1.25">1.25 - Very Good</option>
-                            <option value="1.50">1.50 - Good</option>
-                            <option value="1.75">1.75 - Satisfactory</option>
-                            <option value="2.00">2.00 - Fairly Satisfactory</option>
-                            <option value="2.25">2.25 - Passing</option>
-                            <option value="2.50">2.50 - Passing</option>
-                            <option value="2.75">2.75 - Passing</option>
-                            <option value="3.00">3.00 - Pass</option>
-                            <option value="5.00">5.00 - Fail</option>
-                            <option value="INC">INC - Incomplete</option>
-                            <option value="W">W - Withdrawn</option>
-                        </select>
+                </div>
+
+                <ul class="nav nav-tabs" id="gradeYearTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="year1-tab" data-bs-toggle="tab" data-bs-target="#year1" type="button">Year 1</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="year2-tab" data-bs-toggle="tab" data-bs-target="#year2" type="button">Year 2</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="year3-tab" data-bs-toggle="tab" data-bs-target="#year3" type="button">Year 3</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="year4-tab" data-bs-toggle="tab" data-bs-target="#year4" type="button">Year 4</button>
+                    </li>
+                </ul>
+
+                <div class="tab-content mt-3" id="gradeYearContent">
+                    <div class="tab-pane fade show active" id="year1">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped" id="grades-table-year1">
+                                <thead class="table-light">
+                                    <tr><th>Subject Code</th><th>Subject Name</th><th>Units</th><th>Semester</th><th>Grade</th><th>Date Completed</th><th>Status</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="year2">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped" id="grades-table-year2">
+                                <thead class="table-light">
+                                    <tr><th>Subject Code</th><th>Subject Name</th><th>Units</th><th>Semester</th><th>Grade</th><th>Date Completed</th><th>Status</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="year3">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped" id="grades-table-year3">
+                                <thead class="table-light">
+                                    <td><th>Subject Code</th><th>Subject Name</th><th>Units</th><th>Semester</th><th>Grade</th><th>Date Completed</th><th>Status</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="year4">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped" id="grades-table-year4">
+                                <thead class="table-light">
+                                    <tr><th>Subject Code</th><th>Subject Name</th><th>Units</th><th>Semester</th><th>Grade</th><th>Date Completed</th><th>Status</th></table>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-success"><i class="fas fa-save me-2"></i>Save Grade</button>
-                </div>
-            </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-success" onclick="saveAllGrades()">
+                    <i class="fas fa-save"></i> Save All Changes
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -689,7 +851,6 @@ function prepareEnrollModal(studentId, studentName, program, yearLevel, currentS
     
     currentSectionsForModal = currentSections.map(id => id.toString());
     
-    // Reset checkboxes
     document.querySelectorAll('.section-checkbox').forEach(cb => {
         cb.checked = currentSectionsForModal.includes(cb.value);
         const parent = cb.closest('.section-checkbox-item');
@@ -713,12 +874,10 @@ function loadSubjectsForModal() {
     }
     
     let html = '';
-    let allSubjects = [];
-    
     selectedSections.forEach(sectionId => {
         const subjects = sectionSubjectsMap[sectionId] || [];
         if (subjects.length > 0) {
-            html += `<div class="mb-3"><h6 class="fw-bold text-primary mb-2">${sectionId}</h6>`;
+            html += `<div class="mb-3"><h6 class="fw-bold text-primary mb-2">Section ${sectionId}</h6>`;
             subjects.forEach(subject => {
                 html += `
                     <div class="subject-item">
@@ -732,7 +891,6 @@ function loadSubjectsForModal() {
                         </div>
                     </div>
                 `;
-                allSubjects.push(subject);
             });
             html += `</div>`;
         }
@@ -751,28 +909,130 @@ function updateSummary() {
     const selectedSubjects = Array.from(document.querySelectorAll('.subject-checkbox:checked')).length;
     const studentType = selectedSections > 1 ? 'irregular' : 'regular';
     
-    const summaryHtml = `
+    document.getElementById('enrollmentSummary').innerHTML = `
         <div class="row">
-            <div class="col-md-4">
-                <strong>Sections:</strong> <span class="badge bg-primary">${selectedSections}</span>
-            </div>
-            <div class="col-md-4">
-                <strong>Subjects:</strong> <span class="badge bg-success">${selectedSubjects}</span>
-            </div>
-            <div class="col-md-4">
-                <strong>Student Type:</strong> <span class="badge bg-${studentType === 'regular' ? 'success' : 'warning'}">${studentType}</span>
-            </div>
+            <div class="col-md-4"><strong>Sections:</strong> <span class="badge bg-primary">${selectedSections}</span></div>
+            <div class="col-md-4"><strong>Subjects:</strong> <span class="badge bg-success">${selectedSubjects}</span></div>
+            <div class="col-md-4"><strong>Student Type:</strong> <span class="badge bg-${studentType === 'regular' ? 'success' : 'warning'}">${studentType}</span></div>
         </div>
     `;
-    document.getElementById('enrollmentSummary').innerHTML = summaryHtml;
 }
 
 function prepareGradesModal(studentId, studentName) {
     document.getElementById('grade_student_id').value = studentId;
+    document.getElementById('grade_student_name').value = studentName;
     document.getElementById('gradeStudentInfo').innerHTML = `<strong>Student:</strong> ${studentName} (${studentId})`;
-    document.getElementById('grade_subject_id').value = '';
-    document.getElementById('grade_year_level').value = '';
-    document.getElementById('gradeForm').reset();
+    document.getElementById('csv_student_id').value = studentId;
+    
+    // Load existing grades
+    fetchGrades(studentId);
+}
+
+async function fetchGrades(studentId) {
+    try {
+        const response = await fetch(`ajax_handler.php?action=get_student_grades&student_id=${studentId}`);
+        const data = await response.json();
+        
+        if (data.success && data.grades) {
+            renderGradesTable(data.grades);
+        }
+    } catch (error) {
+        console.error('Error fetching grades:', error);
+    }
+}
+
+function renderGradesTable(grades) {
+    for (let year = 1; year <= 4; year++) {
+        const tbody = document.querySelector(`#grades-table-year${year} tbody`);
+        if (tbody) tbody.innerHTML = '';
+    }
+    
+    grades.forEach(grade => {
+        const year = grade.year_level;
+        const tbody = document.querySelector(`#grades-table-year${year} tbody`);
+        if (tbody) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><code>${escapeHtml(grade.subject_code)}</code></td>
+                <td>${escapeHtml(grade.subject_name)}<br><small class="text-muted">${grade.units} units</small></td>
+                <td>${grade.units}</td>
+                <td>${grade.semester}</td>
+                <td>
+                    <input type="number" class="form-control form-control-sm grade-input" 
+                           data-subject-id="${grade.subject_id}"
+                           data-year="${grade.year_level}"
+                           data-semester="${grade.semester}"
+                           value="${grade.grade || ''}" step="0.01" min="1.0" max="5.0"
+                           style="width: 80px;" placeholder="—">
+                </span></td>
+                <td>
+                    <input type="date" class="form-control form-control-sm date-input" 
+                           value="${grade.date_completed || ''}" style="width: 130px;">
+                </span></td>
+                <td>
+                    <select class="form-select form-select-sm status-select" style="width: 130px;">
+                        <option value="completed" ${grade.status === 'completed' ? 'selected' : ''}>Completed</option>
+                        <option value="in_progress" ${grade.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
+                        <option value="failed" ${grade.status === 'failed' ? 'selected' : ''}>Failed</option>
+                        <option value="pending" ${grade.status === 'pending' ? 'selected' : ''}>Pending</option>
+                    </select>
+                </span></td>
+            `;
+            tbody.appendChild(row);
+        }
+    });
+}
+
+function saveAllGrades() {
+    const studentId = document.getElementById('grade_student_id').value;
+    const updates = [];
+    
+    for (let year = 1; year <= 4; year++) {
+        const rows = document.querySelectorAll(`#grades-table-year${year} tbody tr`);
+        rows.forEach(row => {
+            const gradeInput = row.querySelector('.grade-input');
+            const dateInput = row.querySelector('.date-input');
+            const statusSelect = row.querySelector('.status-select');
+            
+            if (gradeInput && gradeInput.value) {
+                updates.push({
+                    subject_id: gradeInput.dataset.subjectId,
+                    year_level: gradeInput.dataset.year,
+                    semester: gradeInput.dataset.semester,
+                    grade: parseFloat(gradeInput.value),
+                    date_completed: dateInput ? dateInput.value : null,
+                    status: statusSelect ? statusSelect.value : 'completed'
+                });
+            }
+        });
+    }
+    
+    if (updates.length === 0) {
+        alert('No grades to save');
+        return;
+    }
+    
+    fetch('ajax_handler.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'save_student_grades',
+            student_id: studentId,
+            grades: updates
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Grades saved successfully!');
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to save grades');
+    });
 }
 
 function viewStudentDetails(studentId) {
@@ -794,7 +1054,349 @@ function viewStudentDetails(studentId) {
         });
 }
 
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// CSV Upload Functions
+async function uploadGradesCSV(studentId) {
+    const form = document.getElementById('csvUploadForm');
+    const fileInput = document.getElementById('csv_file');
+    const progressDiv = document.getElementById('csvUploadProgress');
+    const progressBar = progressDiv.querySelector('.progress-bar');
+    const statusText = document.getElementById('csvUploadStatus');
+    const resultDiv = document.getElementById('csvUploadResult');
+    const uploadBtn = document.getElementById('uploadCsvBtn');
+    
+    if (!fileInput.files.length) {
+        alert('Please select a CSV file');
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+        alert('Please upload a valid CSV file');
+        return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) {
+        alert('File size exceeds 5MB limit');
+        return;
+    }
+    
+    progressDiv.style.display = 'block';
+    progressBar.style.width = '0%';
+    statusText.textContent = 'Uploading file...';
+    uploadBtn.disabled = true;
+    resultDiv.style.display = 'none';
+    
+    const formData = new FormData(form);
+    formData.set('student_id', studentId);
+    
+    let progress = 0;
+    const interval = setInterval(() => {
+        progress += 10;
+        if (progress <= 90) {
+            progressBar.style.width = progress + '%';
+        }
+    }, 200);
+    
+    try {
+        const response = await fetch('../admin/ajax_handler.php', {
+            method: 'POST',
+            body: formData
+        });
+        
+        clearInterval(interval);
+        const result = await response.json();
+        progressBar.style.width = '100%';
+        
+        if (result.success) {
+            statusText.textContent = 'Processing complete!';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    <strong>Success!</strong> ${result.message}<br>
+                    <small>${result.details || ''}</small>
+                    ${result.errors && result.errors.length > 0 ? 
+                        '<br><br><strong>Warnings/Errors:</strong><ul class="mb-0">' + 
+                        result.errors.map(e => `<li class="small">${e}</li>`).join('') + '</ul>' : ''}
+                </div>
+            `;
+            
+            setTimeout(() => {
+                const studentIdVal = document.getElementById('grade_student_id').value;
+                if (studentIdVal) {
+                    fetchGrades(studentIdVal);
+                }
+            }, 2000);
+        } else {
+            statusText.textContent = 'Upload failed';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i><strong>Error!</strong> ${result.message}</div>`;
+        }
+    } catch (error) {
+        console.error('Upload error:', error);
+        statusText.textContent = 'Upload failed';
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i><strong>Error!</strong> Network error. Please try again.</div>`;
+    } finally {
+        setTimeout(() => {
+            progressBar.style.width = '0%';
+            progressDiv.style.display = 'none';
+        }, 3000);
+        uploadBtn.disabled = false;
+        fileInput.value = '';
+    }
+}
+
+function downloadCsvTemplate() {
+    const headers = ['Subject Code', 'Grade', 'Year Level', 'Semester', 'Academic Year'];
+    const sampleRows = [
+        ['GE101', '', '1', '1st', '2024-2025'],
+        ['GE102', '', '1', '1st', '2024-2025'],
+        ['GE103', '', '1', '1st', '2024-2025'],
+        ['GE104', '', '1', '1st', '2024-2025'],
+        ['CS101', '', '1', '1st', '2024-2025'],
+        ['CS102', '', '1', '1st', '2024-2025'],
+        ['CS104', '', '1', '1st', '2024-2025'],
+        ['PE1', '', '1', '1st', '2024-2025'],
+        ['NSTP1', '', '1', '1st', '2024-2025']
+    ];
+    
+    let csvContent = headers.join(',') + '\n';
+    sampleRows.forEach(row => {
+        csvContent += row.join(',') + '\n';
+    });
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'grade_upload_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    alert('Template downloaded! Fill in the grades and upload.');
+}
+
+// ====================================================
+// BULK GRADE UPLOAD FUNCTIONS
+// ====================================================
+
+// Download BSIT 1A template
+document.getElementById('downloadBsit1aTemplate')?.addEventListener('click', function(e) {
+    e.preventDefault();
+    downloadBsit1aTemplate();
+});
+
+async function downloadBsit1aTemplate() {
+    const sectionSelect = document.getElementById('bulk_section_id');
+    const sectionId = sectionSelect.value;
+    
+    if (!sectionId) {
+        alert('Please select a section first');
+        return;
+    }
+    
+    try {
+        // Get students in the section
+        const studentsResponse = await fetch(`ajax_handler.php?action=get_students_by_section&section_id=${sectionId}`);
+        const studentsData = await studentsResponse.json();
+        
+        if (!studentsData.success || studentsData.students.length === 0) {
+            alert('No students found in this section');
+            return;
+        }
+        
+        // Get subjects for the section
+        const subjectsResponse = await fetch(`ajax_handler.php?action=get_section_assigned_subjects&section_id=${sectionId}`);
+        const subjectsData = await subjectsResponse.json();
+        
+        const subjects = subjectsData.subjects || [];
+        
+        if (subjects.length === 0) {
+            alert('No subjects assigned to this section');
+            return;
+        }
+        
+        const headers = ['Student ID', 'Student Name', 'Subject Code', 'Grade', 'Subject Name', 'Year Level', 'Semester'];
+        const rows = [];
+        
+        studentsData.students.forEach(student => {
+            subjects.forEach(subject => {
+                rows.push([
+                    student.user_id,
+                    student.name,
+                    subject.subject_code,
+                    '',
+                    subject.subject_name,
+                    '1',
+                    '1st'
+                ]);
+            });
+        });
+        
+        let csvContent = headers.join(',') + '\n';
+        rows.forEach(row => {
+            csvContent += row.map(cell => `"${cell}"`).join(',') + '\n';
+        });
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${sectionSelect.options[sectionSelect.selectedIndex].text}_grade_sheet.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        alert('Template downloaded! Fill in the grades and upload.');
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error generating template');
+    }
+}
+
+// Download generic template
+document.getElementById('downloadGenericTemplate')?.addEventListener('click', function(e) {
+    e.preventDefault();
+    downloadGenericTemplate();
+});
+
+function downloadGenericTemplate() {
+    const headers = ['Student ID', 'Student Name', 'Subject Code', 'Grade', 'Subject Name', 'Year Level', 'Semester'];
+    const sampleRows = [
+        ['C24-01-0001-MAN121', 'Juan Dela Cruz', 'GE101', '', 'Understanding the Self', '1', '1st'],
+        ['C24-01-0002-MAN121', 'Maria Santos', 'CS101', '', 'Computer Programming 1', '1', '1st'],
+        ['', '', '', '', '', '', '']
+    ];
+    
+    let csvContent = headers.join(',') + '\n';
+    sampleRows.forEach(row => {
+        csvContent += row.map(cell => `"${cell}"`).join(',') + '\n';
+    });
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'grade_upload_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    alert('Generic template downloaded!');
+}
+
+// Upload bulk grades
+async function uploadBulkGrades() {
+    const form = document.getElementById('bulkGradeUploadForm');
+    const fileInput = document.getElementById('bulk_csv_file');
+    const progressDiv = document.getElementById('bulkUploadProgress');
+    const progressBar = progressDiv.querySelector('.progress-bar');
+    const statusText = document.getElementById('bulkUploadStatus');
+    const resultDiv = document.getElementById('bulkUploadResult');
+    const uploadBtn = document.getElementById('uploadGradesBtn');
+    
+    if (!fileInput.files.length) {
+        alert('Please select a CSV file');
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+        alert('Please upload a valid CSV file');
+        return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) {
+        alert('File size exceeds 5MB limit');
+        return;
+    }
+    
+    progressDiv.style.display = 'block';
+    progressBar.style.width = '0%';
+    statusText.textContent = 'Uploading file...';
+    uploadBtn.disabled = true;
+    resultDiv.style.display = 'none';
+    
+    const formData = new FormData(form);
+    
+    let progress = 0;
+    const interval = setInterval(() => {
+        progress += 10;
+        if (progress <= 90) {
+            progressBar.style.width = progress + '%';
+        }
+    }, 200);
+    
+    try {
+        const response = await fetch('../admin/ajax_handler.php', {
+            method: 'POST',
+            body: formData
+        });
+        
+        clearInterval(interval);
+        const result = await response.json();
+        progressBar.style.width = '100%';
+        
+        if (result.success) {
+            statusText.textContent = 'Processing complete!';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    <strong>Success!</strong> ${result.message}<br>
+                    <small>${result.details || ''}</small>
+                    ${result.errors && result.errors.length > 0 ? 
+                        '<br><br><strong>Warnings/Errors:</strong><ul class="mb-0">' + 
+                        result.errors.map(e => `<li class="small">${escapeHtml(e)}</li>`).join('') + '</ul>' : ''}
+                </div>
+            `;
+            
+            setTimeout(() => {
+                fileInput.value = '';
+                location.reload();
+            }, 2000);
+        } else {
+            statusText.textContent = 'Upload failed';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i><strong>Error!</strong> ${escapeHtml(result.message)}</div>`;
+        }
+    } catch (error) {
+        console.error('Upload error:', error);
+        statusText.textContent = 'Upload failed';
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i><strong>Error!</strong> Network error. Please try again.</div>`;
+    } finally {
+        setTimeout(() => {
+            progressBar.style.width = '0%';
+            progressDiv.style.display = 'none';
+        }, 3000);
+        uploadBtn.disabled = false;
+    }
+}
+
+// Update section ID when selection changes
+document.getElementById('bulk_section_id')?.addEventListener('change', function() {
+    document.getElementById('upload_section_id').value = this.value;
+});
+
 // Event listeners
+document.getElementById('bulkGradeUploadForm')?.addEventListener('submit', function(e) {
+    e.preventDefault();
+    uploadBulkGrades();
+});
+
 document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.section-checkbox').forEach(cb => {
         cb.addEventListener('change', function() {
@@ -812,17 +1414,20 @@ document.addEventListener('DOMContentLoaded', function() {
         updateSummary();
     });
     
-    // Auto-close modals on form submit success
-    const enrollForm = document.getElementById('enrollForm');
-    if (enrollForm) {
-        enrollForm.addEventListener('submit', function() {
-            setTimeout(() => {
-                if (document.querySelector('.alert-success')) {
-                    bootstrap.Modal.getInstance(document.getElementById('enrollStudentModal'))?.hide();
-                }
-            }, 1500);
-        });
-    }
+    document.getElementById('downloadCsvTemplate')?.addEventListener('click', function(e) {
+        e.preventDefault();
+        downloadCsvTemplate();
+    });
+    
+    document.getElementById('csvUploadForm')?.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const studentId = document.getElementById('csv_student_id').value;
+        if (!studentId) {
+            alert('No student selected. Please close and reopen the grades modal.');
+            return;
+        }
+        uploadGradesCSV(studentId);
+    });
 });
 </script>
 

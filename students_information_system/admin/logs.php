@@ -26,7 +26,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $error = 'Description is required.';
             } else {
                 try {
-                    // Get old description for logging
                     $stmt = $pdo->prepare("SELECT description FROM activity_logs WHERE log_id = ?");
                     $stmt->execute([$log_id]);
                     $old_description = $stmt->fetchColumn();
@@ -48,7 +47,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $error = 'Invalid log ID.';
             } else {
                 try {
-                    // Get log info for confirmation message
                     $stmt = $pdo->prepare("SELECT action, description FROM activity_logs WHERE log_id = ?");
                     $stmt->execute([$log_id]);
                     $log = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -56,7 +54,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     if (!$log) {
                         $error = 'Log entry not found.';
                     } else {
-                        // Delete the log
                         $stmt = $pdo->prepare("DELETE FROM activity_logs WHERE log_id = ?");
                         $stmt->execute([$log_id]);
                         
@@ -80,10 +77,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $params = [];
                     
                     if ($clear_type === 'old') {
-                        // Delete logs older than 30 days
                         $where_conditions[] = "created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)";
                     } elseif ($clear_type === 'filtered') {
-                        // Delete based on current filters
                         $action_filter = $_POST['filter_action'] ?? '';
                         $user_filter = $_POST['filter_user'] ?? '';
                         $date_from = $_POST['filter_date_from'] ?? '';
@@ -109,16 +104,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $params[] = $date_to;
                         }
                     }
-                    // For 'all', no conditions - delete everything
                     
                     $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
                     
-                    // Get count for logging
                     $stmt = $pdo->prepare("SELECT COUNT(*) FROM activity_logs {$where_clause}");
                     $stmt->execute($params);
                     $logs_count = $stmt->fetchColumn();
                     
-                    // Delete logs
                     $stmt = $pdo->prepare("DELETE FROM activity_logs {$where_clause}");
                     $stmt->execute($params);
                     $deleted_count = $stmt->rowCount();
@@ -142,7 +134,7 @@ $date_from = $_GET['date_from'] ?? '';
 $date_to = $_GET['date_to'] ?? '';
 $search = $_GET['search'] ?? '';
 
-// Build query
+// Build WHERE conditions
 $where_conditions = [];
 $params = [];
 
@@ -175,30 +167,37 @@ if (!empty($search)) {
 
 $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
 
-// Get activity logs with user information
+// =======================================================
+// PAGINATION SETUP
+// =======================================================
+$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$per_page = isset($_GET['per_page']) ? intval($_GET['per_page']) : 20;
+$per_page = in_array($per_page, [20, 50, 100, 200]) ? $per_page : 20;
+$offset = ($page - 1) * $per_page;
+
+// Get total count
+$count_sql = "SELECT COUNT(*) as total
+              FROM activity_logs al
+              LEFT JOIN users u ON al.user_id = u.user_id
+              {$where_clause}";
+$stmt = $pdo->prepare($count_sql);
+$stmt->execute($params);
+$total_records = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+$total_pages = ceil($total_records / $per_page);
+
+// Get paginated logs
 $query = "SELECT al.*, u.name as user_name, u.role as user_role
           FROM activity_logs al
           LEFT JOIN users u ON al.user_id = u.user_id
           {$where_clause}
           ORDER BY al.created_at DESC
-          LIMIT 500";
+          LIMIT " . intval($per_page) . " OFFSET " . intval($offset);
 
 $stmt = $pdo->prepare($query);
 $stmt->execute($params);
 $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get distinct actions for filter
-$stmt = $pdo->query("SELECT DISTINCT action FROM activity_logs ORDER BY action");
-$actions = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-// Get users for filter
-$stmt = $pdo->query("SELECT DISTINCT u.user_id, u.name FROM users u 
-                     JOIN activity_logs al ON u.user_id = al.user_id 
-                     ORDER BY u.name");
-$users = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Get statistics
-$stats = [];
+// Get statistics (unfiltered counts)
 $stmt = $pdo->query("SELECT COUNT(*) as total FROM activity_logs");
 $stats['total_logs'] = $stmt->fetch()['total'];
 
@@ -211,6 +210,16 @@ $stats['week_logs'] = $stmt->fetch()['total'];
 $stmt = $pdo->query("SELECT COUNT(DISTINCT user_id) as total FROM activity_logs WHERE DATE(created_at) = CURDATE()");
 $stats['active_users_today'] = $stmt->fetch()['total'];
 
+// Get distinct actions for filter
+$stmt = $pdo->query("SELECT DISTINCT action FROM activity_logs ORDER BY action");
+$actions = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+// Get users for filter
+$stmt = $pdo->query("SELECT DISTINCT u.user_id, u.name FROM users u 
+                     JOIN activity_logs al ON u.user_id = al.user_id 
+                     ORDER BY u.name");
+$users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
 renderPageStart('Activity Logs', 'admin', 'logs.php');
 ?>
 
@@ -222,12 +231,45 @@ renderPageStart('Activity Logs', 'admin', 'logs.php');
 .log-action {
     font-weight: bold;
 }
+.pagination {
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.pagination .page-item {
+    margin: 2px;
+}
+.pagination .page-link {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+}
+@media (max-width: 768px) {
+    .pagination {
+        justify-content: center;
+    }
+    .pagination .page-link {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+    }
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+}
 </style>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <h2>Activity Logs</h2>
-    <div class="text-muted">
-        Showing last 500 logs
+    <div>
+        <div class="d-flex align-items-center gap-2">
+            <label class="text-muted small mb-0">Show:</label>
+            <select class="form-select form-select-sm" style="width: auto;" onchange="updatePerPage(this.value)">
+                <option value="20" <?php echo $per_page == 20 ? 'selected' : ''; ?>>20</option>
+                <option value="50" <?php echo $per_page == 50 ? 'selected' : ''; ?>>50</option>
+                <option value="100" <?php echo $per_page == 100 ? 'selected' : ''; ?>>100</option>
+                <option value="200" <?php echo $per_page == 200 ? 'selected' : ''; ?>>200</option>
+            </select>
+            <span class="text-muted small">per page</span>
+        </div>
     </div>
 </div>
 
@@ -259,10 +301,12 @@ renderPageStart('Activity Logs', 'admin', 'logs.php');
     </div>
 </div>
 
-<!-- Filters and Clear Logs Button -->
+<!-- Filters -->
 <div class="card mb-4">
     <div class="card-body">
-        <form method="GET" class="row g-3">
+        <form method="GET" id="filterForm" class="row g-3">
+            <input type="hidden" name="page" value="1">
+            <input type="hidden" name="per_page" value="<?php echo $per_page; ?>">
             <div class="col-md-2">
                 <label for="action" class="form-label">Action</label>
                 <select class="form-select" id="action" name="action">
@@ -313,12 +357,17 @@ renderPageStart('Activity Logs', 'admin', 'logs.php');
             </div>
         </form>
         
-        <!-- Clear Logs Button -->
-        <div class="mt-3 pt-3 border-top">
-            <button class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#clearLogsModal">
+        <!-- Quick Filters -->
+        <div class="mt-3 pt-3 border-top d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setDateRange('today')">Today</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setDateRange('week')">This Week</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setDateRange('month')">This Month</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearFilters()">Clear All</button>
+            </div>
+            <button class="btn btn-danger btn-sm" data-bs-toggle="modal" data-bs-target="#clearLogsModal">
                 <i class="fas fa-trash"></i> Clear Logs
             </button>
-            <small class="text-muted ms-2">Clear logs based on current filters or all logs</small>
         </div>
     </div>
 </div>
@@ -377,15 +426,12 @@ renderPageStart('Activity Logs', 'admin', 'logs.php');
                             </td>
                             <td>
                                 <div class="btn-group" role="group">
-                                    <!-- View Button -->
                                     <button class="btn btn-sm btn-outline-info" 
                                             data-bs-toggle="modal" 
                                             data-bs-target="#viewLogModal<?php echo $log['id']; ?>"
                                             title="View Details">
                                         <i class="fas fa-eye"></i>
                                     </button>
-                                    
-                                    <!-- Delete Button -->
                                     <button class="btn btn-sm btn-outline-danger" 
                                             onclick="deleteLog('<?php echo $log['log_id']; ?>', '<?php echo htmlspecialchars($log['action'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($log['description'], ENT_QUOTES); ?>')"
                                             title="Delete Log">
@@ -398,6 +444,53 @@ renderPageStart('Activity Logs', 'admin', 'logs.php');
                     </tbody>
                 </table>
             </div>
+            
+            <!-- Pagination -->
+            <?php if ($total_pages > 1): ?>
+            <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap">
+                <div class="text-muted small mb-2 mb-md-0">
+                    Showing <?php echo $offset + 1; ?> to <?php echo min($offset + $per_page, $total_records); ?> of <?php echo $total_records; ?> logs
+                </div>
+                <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?page=1&per_page=<?php echo $per_page; ?>&action=<?php echo urlencode($action_filter); ?>&user=<?php echo urlencode($user_filter); ?>&date_from=<?php echo urlencode($date_from); ?>&date_to=<?php echo urlencode($date_to); ?>&search=<?php echo urlencode($search); ?>">&laquo;&laquo;</a>
+                    </li>
+                    <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?page=<?php echo $page - 1; ?>&per_page=<?php echo $per_page; ?>&action=<?php echo urlencode($action_filter); ?>&user=<?php echo urlencode($user_filter); ?>&date_from=<?php echo urlencode($date_from); ?>&date_to=<?php echo urlencode($date_to); ?>&search=<?php echo urlencode($search); ?>">&laquo;</a>
+                    </li>
+                    <?php 
+                    $start_page = max(1, $page - 2);
+                    $end_page = min($total_pages, $page + 2);
+                    
+                    if ($start_page > 1): ?>
+                        <li class="page-item"><a class="page-link" href="?page=1&per_page=<?php echo $per_page; ?>&action=<?php echo urlencode($action_filter); ?>&user=<?php echo urlencode($user_filter); ?>&date_from=<?php echo urlencode($date_from); ?>&date_to=<?php echo urlencode($date_to); ?>&search=<?php echo urlencode($search); ?>">1</a></li>
+                        <?php if ($start_page > 2): ?>
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                    
+                    <?php for($i = $start_page; $i <= $end_page; $i++): ?>
+                        <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
+                            <a class="page-link" href="?page=<?php echo $i; ?>&per_page=<?php echo $per_page; ?>&action=<?php echo urlencode($action_filter); ?>&user=<?php echo urlencode($user_filter); ?>&date_from=<?php echo urlencode($date_from); ?>&date_to=<?php echo urlencode($date_to); ?>&search=<?php echo urlencode($search); ?>"><?php echo $i; ?></a>
+                        </li>
+                    <?php endfor; ?>
+                    
+                    <?php if ($end_page < $total_pages): ?>
+                        <?php if ($end_page < $total_pages - 1): ?>
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                        <?php endif; ?>
+                        <li class="page-item"><a class="page-link" href="?page=<?php echo $total_pages; ?>&per_page=<?php echo $per_page; ?>&action=<?php echo urlencode($action_filter); ?>&user=<?php echo urlencode($user_filter); ?>&date_from=<?php echo urlencode($date_from); ?>&date_to=<?php echo urlencode($date_to); ?>&search=<?php echo urlencode($search); ?>"><?php echo $total_pages; ?></a></li>
+                    <?php endif; ?>
+                    
+                    <li class="page-item <?php echo $page >= $total_pages ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?page=<?php echo $page + 1; ?>&per_page=<?php echo $per_page; ?>&action=<?php echo urlencode($action_filter); ?>&user=<?php echo urlencode($user_filter); ?>&date_from=<?php echo urlencode($date_from); ?>&date_to=<?php echo urlencode($date_to); ?>&search=<?php echo urlencode($search); ?>">&raquo;</a>
+                    </li>
+                    <li class="page-item <?php echo $page >= $total_pages ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?page=<?php echo $total_pages; ?>&per_page=<?php echo $per_page; ?>&action=<?php echo urlencode($action_filter); ?>&user=<?php echo urlencode($user_filter); ?>&date_from=<?php echo urlencode($date_from); ?>&date_to=<?php echo urlencode($date_to); ?>&search=<?php echo urlencode($search); ?>">&raquo;&raquo;</a>
+                    </li>
+                </ul>
+            </div>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>
@@ -416,44 +509,26 @@ renderPageStart('Activity Logs', 'admin', 'logs.php');
                     <div class="col-md-6">
                         <h6>Basic Information</h6>
                         <table class="table table-sm table-borderless">
-                            <tr>
-                                <th width="40%">Log ID:</th>
-                                <td><code><?php echo htmlspecialchars($log['log_id']); ?></code></td>
-                            </tr>
-                            <tr>
-                                <th>Action:</th>
-                                <td><strong><?php echo htmlspecialchars($log['action']); ?></strong></td>
-                            </tr>
-                            <tr>
-                                <th>User:</th>
-                                <td>
-                                    <?php if ($log['user_name']): ?>
-                                        <strong><?php echo htmlspecialchars($log['user_name']); ?></strong><br>
-                                        <small class="text-muted">
-                                            <?php echo ucfirst($log['user_role']); ?> | 
-                                            <code><?php echo htmlspecialchars($log['user_id']); ?></code>
-                                        </small>
-                                    <?php else: ?>
-                                        <span class="text-muted">User Deleted</span><br>
-                                        <small class="text-muted">
-                                            <code><?php echo htmlspecialchars($log['user_id']); ?></code>
-                                        </small>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                        </table>
+                            <tr><th width="40%">Log ID:</th><td><code><?php echo htmlspecialchars($log['log_id']); ?></code></td></tr>
+                            <tr><th>Action:</th><td><strong><?php echo htmlspecialchars($log['action']); ?></strong></td></tr>
+                            <tr><th>User:</th><td>
+                                <?php if ($log['user_name']): ?>
+                                    <strong><?php echo htmlspecialchars($log['user_name']); ?></strong><br>
+                                    <small class="text-muted"><?php echo ucfirst($log['user_role']); ?> | <code><?php echo htmlspecialchars($log['user_id']); ?></code></small>
+                                <?php else: ?>
+                                    <span class="text-muted">User Deleted</span><br>
+                                    <small class="text-muted"><code><?php echo htmlspecialchars($log['user_id']); ?></code></small>
+                                <?php endif; ?>
+                             </span></tr>
+                         </table>
                     </div>
                     <div class="col-md-6">
                         <h6>Timing Information</h6>
                         <table class="table table-sm table-borderless">
-                            <tr>
-                                <th width="40%">Created:</th>
-                                <td><?php echo date('M j, Y g:i A', strtotime($log['created_at'])); ?></td>
-                            </tr>
-                        </table>
+                            <tr><th width="40%">Created:</th><td><?php echo date('M j, Y g:i A', strtotime($log['created_at'])); ?></td></tr>
+                         </table>
                     </div>
                 </div>
-                
                 <div class="row mt-3">
                     <div class="col-12">
                         <h6>Description</h6>
@@ -465,8 +540,7 @@ renderPageStart('Activity Logs', 'admin', 'logs.php');
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-danger" 
-                        onclick="deleteLog('<?php echo $log['log_id']; ?>', '<?php echo htmlspecialchars($log['action'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($log['description'], ENT_QUOTES); ?>')">
+                <button type="button" class="btn btn-danger" onclick="deleteLog('<?php echo $log['log_id']; ?>', '<?php echo htmlspecialchars($log['action'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($log['description'], ENT_QUOTES); ?>')">
                     <i class="fas fa-trash"></i> Delete Log
                 </button>
             </div>
@@ -487,7 +561,6 @@ renderPageStart('Activity Logs', 'admin', 'logs.php');
                 <div class="modal-body">
                     <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
                     <input type="hidden" name="action" value="clear_logs">
-                    <!-- Pass current filter values -->
                     <input type="hidden" name="filter_action" value="<?php echo htmlspecialchars($action_filter); ?>">
                     <input type="hidden" name="filter_user" value="<?php echo htmlspecialchars($user_filter); ?>">
                     <input type="hidden" name="filter_date_from" value="<?php echo htmlspecialchars($date_from); ?>">
@@ -523,26 +596,6 @@ renderPageStart('Activity Logs', 'admin', 'logs.php');
     </div>
 </div>
 
-<!-- Export Options -->
-<div class="row mt-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body">
-                <h6 class="card-title">Export Options</h6>
-                <div class="d-flex gap-2">
-                    <button class="btn btn-outline-success" onclick="exportLogs('csv')">
-                        <i class="fas fa-file-csv"></i> Export as CSV
-                    </button>
-                    <button class="btn btn-outline-danger" onclick="exportLogs('pdf')">
-                        <i class="fas fa-file-pdf"></i> Export as PDF
-                    </button>
-                </div>
-                <small class="text-muted">Export current filtered results</small>
-            </div>
-        </div>
-    </div>
-</div>
-
 <script>
 function deleteLog(logId, action, description) {
     if (confirm(`Are you sure you want to delete this log?\n\nAction: ${action}\nDescription: ${description}\n\nThis action cannot be undone.`)) {
@@ -558,32 +611,12 @@ function deleteLog(logId, action, description) {
     }
 }
 
-function exportLogs(format) {
-    // Get current URL parameters
-    const urlParams = new URLSearchParams(window.location.search);
-    urlParams.set('export', format);
-    
-    // Create a temporary link to trigger download
-    const exportUrl = 'export_logs.php?' + urlParams.toString();
-    window.open(exportUrl, '_blank');
+function updatePerPage(perPage) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('per_page', perPage);
+    url.searchParams.set('page', '1');
+    window.location.href = url.toString();
 }
-
-// Auto-set date range for common filters
-document.addEventListener('DOMContentLoaded', function() {
-    // Add quick filter buttons
-    const quickFilters = document.createElement('div');
-    quickFilters.className = 'mb-3';
-    quickFilters.innerHTML = `
-        <div class="btn-group" role="group" aria-label="Quick filters">
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setDateRange('today')">Today</button>
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setDateRange('week')">This Week</button>
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setDateRange('month')">This Month</button>
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearFilters()">Clear All</button>
-        </div>
-    `;
-    
-    document.querySelector('.card-body form').prepend(quickFilters);
-});
 
 function setDateRange(range) {
     const today = new Date();
@@ -610,23 +643,17 @@ function setDateRange(range) {
             break;
     }
     
-    // Submit form
-    document.querySelector('.card-body form').submit();
+    document.getElementById('filterForm').submit();
 }
 
 function clearFilters() {
-    // Clear all form inputs
     document.getElementById('action').value = '';
     document.getElementById('user').value = '';
     document.getElementById('date_from').value = '';
     document.getElementById('date_to').value = '';
     document.getElementById('search').value = '';
-    
-    // Submit form
-    document.querySelector('.card-body form').submit();
+    document.getElementById('filterForm').submit();
 }
 </script>
 
-<?php
-renderPageEnd(); 
-?>
+<?php renderPageEnd(); ?>

@@ -252,6 +252,67 @@ CREATE TABLE student_course_enrollment (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =======================================================
+-- COURSE TRANSFER HISTORY TABLE
+-- =======================================================
+CREATE TABLE IF NOT EXISTS student_course_transfers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id VARCHAR(50) NOT NULL,
+    from_course_id INT NULL,
+    to_course_id INT NOT NULL,
+    from_course_code VARCHAR(20),
+    to_course_code VARCHAR(20),
+    from_course_name VARCHAR(100),
+    to_course_name VARCHAR(100),
+    transfer_date DATE NOT NULL,
+    reason TEXT,
+    approved_by VARCHAR(50) NOT NULL,
+    year_level_at_transfer INT,
+    semester_at_transfer ENUM('1st', '2nd', 'summer'),
+    academic_year VARCHAR(20),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_transfers_student (student_id),
+    INDEX idx_transfers_date (transfer_date),
+    FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (from_course_id) REFERENCES courses(id) ON DELETE SET NULL,
+    FOREIGN KEY (to_course_id) REFERENCES courses(id) ON DELETE CASCADE,
+    FOREIGN KEY (approved_by) REFERENCES users(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =======================================================
+-- COMPLETED SUBJECTS FROM PREVIOUS COURSES
+-- =======================================================
+CREATE TABLE IF NOT EXISTS student_previous_completions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id VARCHAR(50) NOT NULL,
+    course_id INT NULL,
+    subject_id INT NOT NULL,
+    year_level INT NOT NULL,
+    semester ENUM('1st', '2nd', 'summer') NOT NULL,
+    grade DECIMAL(4,2) NULL,
+    date_completed DATE NULL,
+    is_credited BOOLEAN DEFAULT FALSE,
+    credited_subject_id INT NULL,
+    credited_date DATE NULL,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_previous_completions_student (student_id),
+    INDEX idx_previous_completions_course (course_id),
+    INDEX idx_previous_completions_subject (subject_id),
+    FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE SET NULL,
+    FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
+    FOREIGN KEY (credited_subject_id) REFERENCES subjects(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =======================================================
+-- ADD COURSE_ID TO STUDENTS_INFO
+-- =======================================================
+-- (Already in your schema, just ensure it exists)
+-- ALTER TABLE students_info ADD COLUMN course_id INT NULL AFTER program;
+
+-- =======================================================
 -- GRADES TABLE (Add this to your existing schema)
 -- =======================================================
 CREATE TABLE IF NOT EXISTS grades (

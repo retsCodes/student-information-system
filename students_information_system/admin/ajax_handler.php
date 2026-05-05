@@ -58,6 +58,222 @@ try {
             }
             break;
 
+            // =======================================================
+// AJAX PAGINATION ENDPOINTS
+// =======================================================
+
+case 'get_paginated_payments':
+    // Require login
+    if (!isset($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit;
+    }
+    
+    require_once '../includes/pagination_helper.php';
+    
+    $role = $_SESSION['role'] ?? '';
+    $page = intval($_GET['page'] ?? 1);
+    $per_page = intval($_GET['per_page'] ?? 25);
+    
+    $filters = [
+        'status' => $_GET['status'] ?? '',
+        'search' => $_GET['search'] ?? '',
+        'date_from' => $_GET['date_from'] ?? '',
+        'date_to' => $_GET['date_to'] ?? ''
+    ];
+    
+    try {
+        $pdo = getDBConnection();
+        $pagination = new PaginationHelper($pdo);
+        
+        // Build WHERE based on role
+        $where = "1=1";
+        $params = [];
+        
+        if ($role === 'cashier') {
+            $where .= " AND p.issued_by = ?";
+            $params[] = $_SESSION['user_id'];
+        } elseif ($role === 'student') {
+            $where .= " AND p.student_id = ?";
+            $params[] = $_SESSION['user_id'];
+        }
+        
+        if (!empty($filters['status'])) {
+            $where .= " AND p.payment_status = ?";
+            $params[] = $filters['status'];
+        }
+        
+        if (!empty($filters['search'])) {
+            $where .= " AND (p.description LIKE ? OR p.permit_number LIKE ? OR si.name LIKE ? OR si.user_id LIKE ?)";
+            $search_param = "%{$filters['search']}%";
+            $params = array_merge($params, [$search_param, $search_param, $search_param, $search_param]);
+        }
+        
+        if (!empty($filters['date_from'])) {
+            $where .= " AND p.issued_date >= ?";
+            $params[] = $filters['date_from'];
+        }
+        
+        if (!empty($filters['date_to'])) {
+            $where .= " AND p.issued_date <= ?";
+            $params[] = $filters['date_to'];
+        }
+        
+        $results = $pagination
+            ->setTable('payments p')
+            ->setColumns('p.*, si.name as student_name, si.program, si.year_level, u.name as issued_by_name')
+            ->setJoins('JOIN students_info si ON p.student_id = si.user_id JOIN users u ON p.issued_by = u.user_id')
+            ->setWhere($where, $params)
+            ->setOrderBy('ORDER BY p.issued_date DESC, p.id DESC')
+            ->setPage($page)
+            ->setPerPage($per_page)
+            ->getResults();
+        
+        echo json_encode([
+            'success' => true,
+            'data' => $results['data'],
+            'pagination' => $results['pagination']
+        ]);
+        exit;
+        
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        exit;
+    }
+    break;
+
+case 'get_paginated_users':
+    if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit;
+    }
+    
+    require_once '../includes/pagination_helper.php';
+    
+    $page = intval($_GET['page'] ?? 1);
+    $per_page = intval($_GET['per_page'] ?? 25);
+    
+    $filters = [
+        'role' => $_GET['role'] ?? '',
+        'status' => $_GET['status'] ?? '',
+        'search' => $_GET['search'] ?? '',
+        'program' => $_GET['program'] ?? '',
+        'year_level' => $_GET['year_level'] ?? ''
+    ];
+    
+    try {
+        $pdo = getDBConnection();
+        $results = getPaginatedUsers($pdo, $page, $per_page, $filters);
+        
+        echo json_encode([
+            'success' => true,
+            'data' => $results['data'],
+            'pagination' => $results['pagination']
+        ]);
+        exit;
+        
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        exit;
+    }
+    break;
+
+case 'get_paginated_study_load':
+    if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'student') {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit;
+    }
+    
+    require_once '../includes/pagination_helper.php';
+    
+    $student_id = $_SESSION['user_id'];
+    $page = intval($_GET['page'] ?? 1);
+    $per_page = intval($_GET['per_page'] ?? 10);
+    $year_filter = intval($_GET['year'] ?? 0);
+    
+    try {
+        $pdo = getDBConnection();
+        $pagination = new PaginationHelper($pdo);
+        
+        $where = "ss.student_id = ?";
+        $params = [$student_id];
+        
+        if ($year_filter > 0) {
+            $where .= " AND sec.year_level = ?";
+            $params[] = $year_filter;
+        }
+        
+        $results = $pagination
+            ->setTable('student_sections ss')
+            ->setColumns('DISTINCT s.*, sec.year_level as section_year, sec.semester as section_semester, sec.section_code')
+            ->setJoins('JOIN sections sec ON ss.section_id = sec.id JOIN subject_sections subsec ON sec.id = subsec.section_id JOIN subjects s ON subsec.subject_id = s.id')
+            ->setWhere($where, $params)
+            ->setOrderBy('ORDER BY sec.year_level, sec.semester, s.subject_code')
+            ->setPage($page)
+            ->setPerPage($per_page)
+            ->getResults();
+        
+        echo json_encode([
+            'success' => true,
+            'data' => $results['data'],
+            'pagination' => $results['pagination']
+        ]);
+        exit;
+        
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        exit;
+    }
+    break;
+
+case 'get_paginated_completions':
+    if (!isset($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit;
+    }
+    
+    require_once '../includes/pagination_helper.php';
+    
+    $student_id = $_SESSION['user_id'];
+    $page = intval($_GET['page'] ?? 1);
+    $per_page = intval($_GET['per_page'] ?? 10);
+    $year_filter = intval($_GET['year'] ?? 0);
+    
+    try {
+        $pdo = getDBConnection();
+        $pagination = new PaginationHelper($pdo);
+        
+        $where = "scc.student_id = ?";
+        $params = [$student_id];
+        
+        if ($year_filter > 0) {
+            $where .= " AND scc.year_level = ?";
+            $params[] = $year_filter;
+        }
+        
+        $results = $pagination
+            ->setTable('student_course_completion scc')
+            ->setColumns('scc.*, s.subject_code, s.subject_name, s.units')
+            ->setJoins('JOIN subjects s ON scc.subject_id = s.id')
+            ->setWhere($where, $params)
+            ->setOrderBy('ORDER BY scc.year_level, scc.semester, scc.date_completed DESC')
+            ->setPage($page)
+            ->setPerPage($per_page)
+            ->getResults();
+        
+        echo json_encode([
+            'success' => true,
+            'data' => $results['data'],
+            'pagination' => $results['pagination']
+        ]);
+        exit;
+        
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        exit;
+    }
+    break;
+
         case 'calculate_payment':
             $course_id = intval($_GET['course_id'] ?? 0);
             $response = calculatePayment($pdo, $course_id);
@@ -139,6 +355,80 @@ try {
             $response = getCourseDetails($pdo, $course_id);
             break;
 
+            case 'get_paginated_audit_logs':
+                if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'cashier') {
+                    echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+                    exit;
+                }
+                
+                $user_id = $_SESSION['user_id'];
+                $page = intval($_POST['page'] ?? 1);
+                $per_page = intval($_POST['per_page'] ?? 20);
+                $date_from = $_POST['date_from'] ?? '';
+                $date_to = $_POST['date_to'] ?? '';
+                $search = $_POST['search'] ?? '';
+                
+                $allowed_per_page = [10, 20, 50, 100];
+                if (!in_array($per_page, $allowed_per_page)) {
+                    $per_page = 20;
+                }
+                
+                $offset = ($page - 1) * $per_page;
+                
+                $where_conditions = ["(al.user_id = ? OR al.description LIKE ?)"];
+                $params = [$user_id, "%{$user_id}%"];
+                
+                if (!empty($date_from)) {
+                    $where_conditions[] = "DATE(al.created_at) >= ?";
+                    $params[] = $date_from;
+                }
+                if (!empty($date_to)) {
+                    $where_conditions[] = "DATE(al.created_at) <= ?";
+                    $params[] = $date_to;
+                }
+                if (!empty($search)) {
+                    $where_conditions[] = "(al.description LIKE ? OR al.action LIKE ?)";
+                    $search_param = "%{$search}%";
+                    $params[] = $search_param;
+                    $params[] = $search_param;
+                }
+                
+                $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
+                
+                // Get total count
+                $count_sql = "SELECT COUNT(*) as total FROM activity_logs al JOIN users u ON al.user_id = u.user_id {$where_clause}";
+                $stmt = $pdo->prepare($count_sql);
+                $stmt->execute($params);
+                $total_records = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+                $total_pages = ceil($total_records / $per_page);
+                
+                // Get data
+                $query = "SELECT al.*, u.name as user_name, u.role as user_role
+                          FROM activity_logs al
+                          JOIN users u ON al.user_id = u.user_id
+                          {$where_clause}
+                          ORDER BY al.created_at DESC
+                          LIMIT {$per_page} OFFSET {$offset}";
+                
+                $stmt = $pdo->prepare($query);
+                $stmt->execute($params);
+                $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                echo json_encode([
+                    'success' => true,
+                    'data' => $logs,
+                    'pagination' => [
+                        'current_page' => $page,
+                        'per_page' => $per_page,
+                        'total_records' => $total_records,
+                        'total_pages' => $total_pages,
+                        'showing_start' => $offset + 1,
+                        'showing_end' => min($offset + $per_page, $total_records)
+                    ]
+                ]);
+                exit;
+                break;
+
         case 'get_assessment_file':
             $student_id = sanitizeInput($_GET['student_id'] ?? $_SESSION['user_id'] ?? '');
             $response = getAssessmentFile($pdo, $student_id, $_SESSION);
@@ -165,6 +455,8 @@ try {
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
             exit;
+
+            
 
         case 'get_course_curriculum_full':
             $course_id = intval($_GET['course_id'] ?? 0);
@@ -220,6 +512,983 @@ try {
                 exit;
             }
             break;
+            case 'get_available_courses_for_transfer':
+                $student_id = $_GET['student_id'] ?? '';
+                
+                try {
+                    $pdo = getDBConnection();
+                    
+                    // Get current student's course to exclude it
+                    $current_course_id = null;
+                    if (!empty($student_id)) {
+                        $stmt = $pdo->prepare("SELECT course_id FROM students_info WHERE user_id = ?");
+                        $stmt->execute([$student_id]);
+                        $current_course_id = $stmt->fetchColumn();
+                    }
+                    
+                    // Get all active courses except current
+                    if ($current_course_id) {
+                        $stmt = $pdo->prepare("SELECT id, course_code, course_name FROM courses WHERE status = 'active' AND id != ? ORDER BY course_code");
+                        $stmt->execute([$current_course_id]);
+                    } else {
+                        $stmt = $pdo->prepare("SELECT id, course_code, course_name FROM courses WHERE status = 'active' ORDER BY course_code");
+                        $stmt->execute();
+                    }
+                    $courses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    
+                    echo json_encode(['success' => true, 'courses' => $courses]);
+                    exit;
+                } catch (Exception $e) {
+                    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+                    exit;
+                }
+                break;
+
+                case 'upload_grades_csv':
+                    // Check if user is admin or registrar
+                    if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'registrar'])) {
+                        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+                        exit;
+                    }
+                    
+                    if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
+                        echo json_encode(['success' => false, 'message' => 'Please select a valid CSV file']);
+                        exit;
+                    }
+                    
+                    $student_id = $_POST['student_id'] ?? '';
+                    if (empty($student_id)) {
+                        echo json_encode(['success' => false, 'message' => 'Student ID is required']);
+                        exit;
+                    }
+                    
+                    // Check file extension
+                    $file_ext = strtolower(pathinfo($_FILES['csv_file']['name'], PATHINFO_EXTENSION));
+                    if ($file_ext !== 'csv') {
+                        echo json_encode(['success' => false, 'message' => 'Please upload a CSV file']);
+                        exit;
+                    }
+                    
+                    $file = fopen($_FILES['csv_file']['tmp_name'], 'r');
+                    if (!$file) {
+                        echo json_encode(['success' => false, 'message' => 'Failed to open file']);
+                        exit;
+                    }
+                    
+                    // Read header row (skip it)
+                    $headers = fgetcsv($file);
+                    
+                    $success_count = 0;
+                    $error_count = 0;
+                    $errors = [];
+                    $row_number = 1;
+                    
+                    try {
+                        $pdo->beginTransaction();
+                        
+                        while (($row = fgetcsv($file)) !== false) {
+                            $row_number++;
+                            
+                            // Skip empty rows (all columns empty)
+                            if (empty(array_filter($row))) {
+                                continue;
+                            }
+                            
+                            // Ensure we have at least 2 columns
+                            $subject_code = trim($row[0] ?? '');
+                            $grade_value = trim($row[1] ?? '');
+                            $year_level = isset($row[2]) ? intval(trim($row[2])) : 1;
+                            $semester = trim($row[3] ?? '1st');
+                            $academic_year = trim($row[4] ?? date('Y') . '-' . (date('Y') + 1));
+                            
+                            // Validate required fields
+                            if (empty($subject_code)) {
+                                $errors[] = "Row {$row_number}: Subject code is required";
+                                $error_count++;
+                                continue;
+                            }
+                            
+                            if (empty($grade_value)) {
+                                $errors[] = "Row {$row_number}: Grade is required for subject '{$subject_code}'";
+                                $error_count++;
+                                continue;
+                            }
+                            
+                            // Validate year level
+                            if ($year_level < 1 || $year_level > 4) {
+                                $errors[] = "Row {$row_number}: Invalid year level '{$year_level}'. Must be 1-4";
+                                $error_count++;
+                                continue;
+                            }
+                            
+                            // Validate semester
+                            if (!in_array($semester, ['1st', '2nd', 'summer'])) {
+                                $errors[] = "Row {$row_number}: Invalid semester '{$semester}'. Use '1st', '2nd', or 'summer'";
+                                $error_count++;
+                                continue;
+                            }
+                            
+                            // Get subject ID
+                            $stmt = $pdo->prepare("SELECT id, units, subject_name FROM subjects WHERE subject_code = ?");
+                            $stmt->execute([$subject_code]);
+                            $subject = $stmt->fetch(PDO::FETCH_ASSOC);
+                            
+                            if (!$subject) {
+                                $errors[] = "Row {$row_number}: Subject code '{$subject_code}' not found in database";
+                                $error_count++;
+                                continue;
+                            }
+                            
+                            // Convert grade to numeric
+                            $grade_numeric = null;
+                            $grade_map = [
+                                '1.0' => 1.00, '1.00' => 1.00,
+                                '1.25' => 1.25,
+                                '1.5' => 1.50, '1.50' => 1.50,
+                                '1.75' => 1.75,
+                                '2.0' => 2.00, '2.00' => 2.00,
+                                '2.25' => 2.25,
+                                '2.5' => 2.50, '2.50' => 2.50,
+                                '2.75' => 2.75,
+                                '3.0' => 3.00, '3.00' => 3.00,
+                                '5.0' => 5.00, '5.00' => 5.00,
+                                'A' => 1.00, 'A+' => 1.00, 'A-' => 1.25,
+                                'B' => 1.75, 'B+' => 1.50, 'B-' => 2.00,
+                                'C' => 2.50, 'C+' => 2.25, 'C-' => 2.75,
+                                'D' => 3.00,
+                                'F' => 5.00,
+                                'P' => 3.00, 'Pass' => 3.00,
+                                'INC' => null, 'Incomplete' => null,
+                                'W' => null, 'Withdrawn' => null
+                            ];
+                            
+                            $grade_upper = strtoupper(trim($grade_value));
+                            if (isset($grade_map[$grade_upper])) {
+                                $grade_numeric = $grade_map[$grade_upper];
+                            } elseif (is_numeric($grade_value)) {
+                                $grade_numeric = floatval($grade_value);
+                            } else {
+                                $errors[] = "Row {$row_number}: Invalid grade format '{$grade_value}' for subject '{$subject_code}'";
+                                $error_count++;
+                                continue;
+                            }
+                            
+                            // Check if grade record already exists
+                            $stmt = $pdo->prepare("
+                                SELECT id FROM student_course_completion 
+                                WHERE student_id = ? AND subject_id = ? AND year_level = ? AND semester = ?
+                            ");
+                            $stmt->execute([$student_id, $subject['id'], $year_level, $semester]);
+                            
+                            if ($stmt->fetch()) {
+                                // Update existing record
+                                $stmt = $pdo->prepare("
+                                    UPDATE student_course_completion 
+                                    SET grade = ?, status = 'completed', date_completed = CURDATE()
+                                    WHERE student_id = ? AND subject_id = ? AND year_level = ? AND semester = ?
+                                ");
+                                $stmt->execute([$grade_numeric, $student_id, $subject['id'], $year_level, $semester]);
+                            } else {
+                                // Insert new record
+                                $stmt = $pdo->prepare("
+                                    INSERT INTO student_course_completion 
+                                    (student_id, subject_id, year_level, semester, academic_year, grade, status, date_completed)
+                                    VALUES (?, ?, ?, ?, ?, ?, 'completed', CURDATE())
+                                ");
+                                $stmt->execute([$student_id, $subject['id'], $year_level, $semester, $academic_year, $grade_numeric]);
+                            }
+                            
+                            $success_count++;
+                        }
+                        
+                        fclose($file);
+                        $pdo->commit();
+                        
+                        logActivity($_SESSION['user_id'], 'Grades Uploaded (CSV)', 
+                            "Uploaded grades for student {$student_id}: {$success_count} successful, {$error_count} failed");
+                        
+                        echo json_encode([
+                            'success' => true,
+                            'message' => "Grades uploaded successfully!",
+                            'details' => "✅ {$success_count} grades saved",
+                            'errors' => $errors,
+                            'success_count' => $success_count,
+                            'error_count' => $error_count
+                        ]);
+                        
+                    } catch (Exception $e) {
+                        if ($pdo->inTransaction()) $pdo->rollBack();
+                        fclose($file);
+                        echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+                    }
+                    exit;
+                    break;
+                    case 'upload_section_grades_csv':
+                        // Check if user is admin
+                        if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+                            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+                            exit;
+                        }
+                        
+                        if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
+                            echo json_encode(['success' => false, 'message' => 'Please select a valid CSV file']);
+                            exit;
+                        }
+                        
+                        $section_id = intval($_POST['section_id'] ?? 0);
+                        if ($section_id <= 0) {
+                            echo json_encode(['success' => false, 'message' => 'Section ID is required']);
+                            exit;
+                        }
+                        
+                        $file_ext = strtolower(pathinfo($_FILES['csv_file']['name'], PATHINFO_EXTENSION));
+                        if ($file_ext !== 'csv') {
+                            echo json_encode(['success' => false, 'message' => 'Please upload a CSV file']);
+                            exit;
+                        }
+                        
+                        $file = fopen($_FILES['csv_file']['tmp_name'], 'r');
+                        if (!$file) {
+                            echo json_encode(['success' => false, 'message' => 'Failed to open file']);
+                            exit;
+                        }
+                        
+                        // Read header row
+                        $headers = fgetcsv($file);
+                        
+                        $success_count = 0;
+                        $error_count = 0;
+                        $errors = [];
+                        $row_number = 1;
+                        
+                        // Get section info
+                        $stmt = $pdo->prepare("SELECT section_code, program, year_level FROM sections WHERE id = ?");
+                        $stmt->execute([$section_id]);
+                        $section_info = $stmt->fetch(PDO::FETCH_ASSOC);
+                        
+                        if (!$section_info) {
+                            echo json_encode(['success' => false, 'message' => 'Section not found']);
+                            exit;
+                        }
+                        
+                        try {
+                            $pdo->beginTransaction();
+                            
+                            while (($row = fgetcsv($file)) !== false) {
+                                $row_number++;
+                                
+                                if (empty(array_filter($row))) continue;
+                                
+                                // Expected columns: Student ID, Student Name, Subject Code, Grade, Subject Name, Year Level, Semester
+                                $student_id = trim($row[0] ?? '');
+                                $student_name = trim($row[1] ?? '');
+                                $subject_code = trim($row[2] ?? '');
+                                $grade_value = trim($row[3] ?? '');
+                                $subject_name = trim($row[4] ?? '');
+                                $year_level = isset($row[5]) ? intval(trim($row[5])) : $section_info['year_level'];
+                                $semester = trim($row[6] ?? '1st');
+                                $academic_year = trim($row[7] ?? date('Y') . '-' . (date('Y') + 1));
+                                
+                                if (empty($student_id)) {
+                                    $errors[] = "Row {$row_number}: Student ID is required";
+                                    $error_count++;
+                                    continue;
+                                }
+                                
+                                if (empty($subject_code)) {
+                                    $errors[] = "Row {$row_number}: Subject code is required for student {$student_id}";
+                                    $error_count++;
+                                    continue;
+                                }
+                                
+                                if (empty($grade_value)) {
+                                    $errors[] = "Row {$row_number}: Grade is required for student {$student_id} - {$subject_code}";
+                                    $error_count++;
+                                    continue;
+                                }
+                                
+                                // Verify student exists and is in this section
+                                $stmt = $pdo->prepare("
+                                    SELECT u.user_id, u.name 
+                                    FROM users u
+                                    JOIN student_sections ss ON u.user_id = ss.student_id
+                                    WHERE u.user_id = ? AND ss.section_id = ? AND u.role = 'student'
+                                ");
+                                $stmt->execute([$student_id, $section_id]);
+                                $student = $stmt->fetch(PDO::FETCH_ASSOC);
+                                
+                                if (!$student) {
+                                    $errors[] = "Row {$row_number}: Student '{$student_id}' not found or not in this section";
+                                    $error_count++;
+                                    continue;
+                                }
+                                
+                                // Get subject ID
+                                $stmt = $pdo->prepare("SELECT id, units FROM subjects WHERE subject_code = ?");
+                                $stmt->execute([$subject_code]);
+                                $subject = $stmt->fetch(PDO::FETCH_ASSOC);
+                                
+                                if (!$subject) {
+                                    $errors[] = "Row {$row_number}: Subject code '{$subject_code}' not found";
+                                    $error_count++;
+                                    continue;
+                                }
+                                
+                                // Convert grade to numeric
+                                $grade_numeric = null;
+                                $grade_map = [
+                                    '1.0' => 1.00, '1.00' => 1.00, '1.25' => 1.25,
+                                    '1.5' => 1.50, '1.50' => 1.50, '1.75' => 1.75,
+                                    '2.0' => 2.00, '2.00' => 2.00, '2.25' => 2.25,
+                                    '2.5' => 2.50, '2.50' => 2.50, '2.75' => 2.75,
+                                    '3.0' => 3.00, '3.00' => 3.00, '5.0' => 5.00, '5.00' => 5.00,
+                                    'A' => 1.00, 'A-' => 1.25, 'B+' => 1.50, 'B' => 1.75, 'B-' => 2.00,
+                                    'C+' => 2.25, 'C' => 2.50, 'C-' => 2.75, 'D' => 3.00, 'F' => 5.00,
+                                    'P' => 3.00, 'INC' => null, 'W' => null
+                                ];
+                                
+                                $grade_upper = strtoupper(trim($grade_value));
+                                if (isset($grade_map[$grade_upper])) {
+                                    $grade_numeric = $grade_map[$grade_upper];
+                                } elseif (is_numeric($grade_value)) {
+                                    $grade_numeric = floatval($grade_value);
+                                } else {
+                                    $errors[] = "Row {$row_number}: Invalid grade format '{$grade_value}' for student {$student_id} - {$subject_code}";
+                                    $error_count++;
+                                    continue;
+                                }
+                                
+                                // Check if grade record exists
+                                $stmt = $pdo->prepare("
+                                    SELECT id FROM student_course_completion 
+                                    WHERE student_id = ? AND subject_id = ? AND year_level = ? AND semester = ?
+                                ");
+                                $stmt->execute([$student_id, $subject['id'], $year_level, $semester]);
+                                
+                                if ($stmt->fetch()) {
+                                    // Update existing record
+                                    $stmt = $pdo->prepare("
+                                        UPDATE student_course_completion 
+                                        SET grade = ?, status = 'completed', date_completed = CURDATE()
+                                        WHERE student_id = ? AND subject_id = ? AND year_level = ? AND semester = ?
+                                    ");
+                                    $stmt->execute([$grade_numeric, $student_id, $subject['id'], $year_level, $semester]);
+                                } else {
+                                    // Insert new record
+                                    $stmt = $pdo->prepare("
+                                        INSERT INTO student_course_completion 
+                                        (student_id, subject_id, year_level, semester, academic_year, grade, status, date_completed)
+                                        VALUES (?, ?, ?, ?, ?, ?, 'completed', CURDATE())
+                                    ");
+                                    $stmt->execute([$student_id, $subject['id'], $year_level, $semester, $academic_year, $grade_numeric]);
+                                }
+                                
+                                $success_count++;
+                            }
+                            
+                            fclose($file);
+                            $pdo->commit();
+                            
+                            logActivity($_SESSION['user_id'], 'Section Grades Uploaded (CSV)', 
+                                "Uploaded grades for section {$section_info['section_code']}: {$success_count} successful, {$error_count} failed");
+                            
+                            echo json_encode([
+                                'success' => true,
+                                'message' => "Grades uploaded successfully for section {$section_info['section_code']}!",
+                                'details' => "✅ {$success_count} grades saved",
+                                'errors' => $errors,
+                                'success_count' => $success_count,
+                                'error_count' => $error_count
+                            ]);
+                            
+                        } catch (Exception $e) {
+                            if ($pdo->inTransaction()) $pdo->rollBack();
+                            fclose($file);
+                            echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+                        }
+                        exit;
+                        break;
+
+                        case 'upload_grades_bulk':
+                            // Check if user is admin or registrar
+                            if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'registrar'])) {
+                                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+                                exit;
+                            }
+                            
+                            if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
+                                echo json_encode(['success' => false, 'message' => 'Please select a valid CSV file']);
+                                exit;
+                            }
+                            
+                            $upload_type = $_POST['upload_type'] ?? 'section'; // 'section', 'subject', or 'custom'
+                            $section_id = intval($_POST['section_id'] ?? 0);
+                            $subject_id = intval($_POST['subject_id'] ?? 0);
+                            
+                            $file_ext = strtolower(pathinfo($_FILES['csv_file']['name'], PATHINFO_EXTENSION));
+                            if ($file_ext !== 'csv') {
+                                echo json_encode(['success' => false, 'message' => 'Please upload a CSV file']);
+                                exit;
+                            }
+                            
+                            $file = fopen($_FILES['csv_file']['tmp_name'], 'r');
+                            if (!$file) {
+                                echo json_encode(['success' => false, 'message' => 'Failed to open file']);
+                                exit;
+                            }
+                            
+                            // Read header row
+                            $headers = fgetcsv($file);
+                            
+                            // Detect column mapping
+                            $col_map = [
+                                'student_id' => array_search('Student ID', $headers),
+                                'student_name' => array_search('Student Name', $headers),
+                                'subject_code' => array_search('Subject Code', $headers),
+                                'grade' => array_search('Grade', $headers),
+                                'subject_name' => array_search('Subject Name', $headers),
+                                'year_level' => array_search('Year Level', $headers),
+                                'semester' => array_search('Semester', $headers),
+                                'academic_year' => array_search('Academic Year', $headers)
+                            ];
+                            
+                            // If standard headers not found, try alternative naming
+                            if ($col_map['student_id'] === false) $col_map['student_id'] = array_search('StudentID', $headers);
+                            if ($col_map['student_id'] === false) $col_map['student_id'] = 0;
+                            if ($col_map['student_name'] === false) $col_map['student_name'] = 1;
+                            if ($col_map['subject_code'] === false) $col_map['subject_code'] = 2;
+                            if ($col_map['grade'] === false) $col_map['grade'] = 3;
+                            
+                            $success_count = 0;
+                            $error_count = 0;
+                            $errors = [];
+                            $row_number = 1;
+                            
+                            try {
+                                $pdo->beginTransaction();
+                                
+                                // If uploading by subject, get subject info once
+                                $subject_info = null;
+                                if ($upload_type === 'subject' && $subject_id > 0) {
+                                    $stmt = $pdo->prepare("SELECT id, subject_code, subject_name, units FROM subjects WHERE id = ?");
+                                    $stmt->execute([$subject_id]);
+                                    $subject_info = $stmt->fetch(PDO::FETCH_ASSOC);
+                                    if (!$subject_info) {
+                                        echo json_encode(['success' => false, 'message' => 'Subject not found']);
+                                        exit;
+                                    }
+                                }
+                                
+                                // If uploading by section, get section info once
+                                $section_info = null;
+                                if ($upload_type === 'section' && $section_id > 0) {
+                                    $stmt = $pdo->prepare("SELECT id, section_code, program, year_level FROM sections WHERE id = ?");
+                                    $stmt->execute([$section_id]);
+                                    $section_info = $stmt->fetch(PDO::FETCH_ASSOC);
+                                    if (!$section_info) {
+                                        echo json_encode(['success' => false, 'message' => 'Section not found']);
+                                        exit;
+                                    }
+                                    
+                                    // Get all students in this section for validation
+                                    $stmt = $pdo->prepare("
+                                        SELECT u.user_id, u.name 
+                                        FROM student_sections ss
+                                        JOIN users u ON ss.student_id = u.user_id
+                                        WHERE ss.section_id = ?
+                                    ");
+                                    $stmt->execute([$section_id]);
+                                    $section_students = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+                                }
+                                
+                                while (($row = fgetcsv($file)) !== false) {
+                                    $row_number++;
+                                    
+                                    if (empty(array_filter($row))) continue;
+                                    
+                                    // Extract data from row
+                                    $student_id = trim($row[$col_map['student_id']] ?? '');
+                                    $student_name = trim($row[$col_map['student_name']] ?? '');
+                                    $subject_code = trim($row[$col_map['subject_code']] ?? '');
+                                    $grade_value = trim($row[$col_map['grade']] ?? '');
+                                    $subject_name = trim($row[$col_map['subject_name']] ?? '');
+                                    $year_level = isset($row[$col_map['year_level']]) ? intval(trim($row[$col_map['year_level']])) : ($section_info['year_level'] ?? 1);
+                                    $semester = trim($row[$col_map['semester']] ?? '1st');
+                                    $academic_year = trim($row[$col_map['academic_year']] ?? date('Y') . '-' . (date('Y') + 1));
+                                    
+                                    if (empty($student_id)) {
+                                        $errors[] = "Row {$row_number}: Student ID is required";
+                                        $error_count++;
+                                        continue;
+                                    }
+                                    
+                                    if (empty($grade_value)) {
+                                        $errors[] = "Row {$row_number}: Grade is required for student {$student_id}";
+                                        $error_count++;
+                                        continue;
+                                    }
+                                    
+                                    // Get or validate subject
+                                    if ($upload_type === 'subject' && $subject_info) {
+                                        $subject_id_val = $subject_info['id'];
+                                        $subject_code_val = $subject_info['subject_code'];
+                                    } else {
+                                        if (empty($subject_code)) {
+                                            $errors[] = "Row {$row_number}: Subject code is required";
+                                            $error_count++;
+                                            continue;
+                                        }
+                                        $stmt = $pdo->prepare("SELECT id, subject_code, units FROM subjects WHERE subject_code = ?");
+                                        $stmt->execute([$subject_code]);
+                                        $subject = $stmt->fetch(PDO::FETCH_ASSOC);
+                                        if (!$subject) {
+                                            $errors[] = "Row {$row_number}: Subject code '{$subject_code}' not found";
+                                            $error_count++;
+                                            continue;
+                                        }
+                                        $subject_id_val = $subject['id'];
+                                        $subject_code_val = $subject['subject_code'];
+                                    }
+                                    
+                                    // Validate student for section upload
+                                    if ($upload_type === 'section' && $section_info) {
+                                        if (!isset($section_students[$student_id])) {
+                                            $errors[] = "Row {$row_number}: Student '{$student_id}' is not in section {$section_info['section_code']}";
+                                            $error_count++;
+                                            continue;
+                                        }
+                                    } else {
+                                        // Verify student exists
+                                        $stmt = $pdo->prepare("SELECT user_id, name FROM users WHERE user_id = ? AND role = 'student'");
+                                        $stmt->execute([$student_id]);
+                                        $student = $stmt->fetch(PDO::FETCH_ASSOC);
+                                        if (!$student) {
+                                            $errors[] = "Row {$row_number}: Student '{$student_id}' not found";
+                                            $error_count++;
+                                            continue;
+                                        }
+                                    }
+                                    
+                                    // Convert grade to numeric
+                                    $grade_numeric = null;
+                                    $grade_map = [
+                                        '1.0' => 1.00, '1.00' => 1.00, '1.25' => 1.25,
+                                        '1.5' => 1.50, '1.50' => 1.50, '1.75' => 1.75,
+                                        '2.0' => 2.00, '2.00' => 2.00, '2.25' => 2.25,
+                                        '2.5' => 2.50, '2.50' => 2.50, '2.75' => 2.75,
+                                        '3.0' => 3.00, '3.00' => 3.00, '5.0' => 5.00, '5.00' => 5.00,
+                                        'A' => 1.00, 'A-' => 1.25, 'B+' => 1.50, 'B' => 1.75, 'B-' => 2.00,
+                                        'C+' => 2.25, 'C' => 2.50, 'C-' => 2.75, 'D' => 3.00, 'F' => 5.00,
+                                        'P' => 3.00, 'INC' => null, 'W' => null, 'DRP' => null
+                                    ];
+                                    
+                                    $grade_upper = strtoupper(trim($grade_value));
+                                    if (isset($grade_map[$grade_upper])) {
+                                        $grade_numeric = $grade_map[$grade_upper];
+                                    } elseif (is_numeric($grade_value)) {
+                                        $grade_numeric = floatval($grade_value);
+                                    } else {
+                                        $errors[] = "Row {$row_number}: Invalid grade format '{$grade_value}' for student {$student_id}";
+                                        $error_count++;
+                                        continue;
+                                    }
+                                    
+                                    // Check if grade record exists
+                                    $stmt = $pdo->prepare("
+                                        SELECT id FROM student_course_completion 
+                                        WHERE student_id = ? AND subject_id = ? AND year_level = ? AND semester = ?
+                                    ");
+                                    $stmt->execute([$student_id, $subject_id_val, $year_level, $semester]);
+                                    
+                                    if ($stmt->fetch()) {
+                                        // Update existing record
+                                        $stmt = $pdo->prepare("
+                                            UPDATE student_course_completion 
+                                            SET grade = ?, status = 'completed', date_completed = CURDATE()
+                                            WHERE student_id = ? AND subject_id = ? AND year_level = ? AND semester = ?
+                                        ");
+                                        $stmt->execute([$grade_numeric, $student_id, $subject_id_val, $year_level, $semester]);
+                                    } else {
+                                        // Insert new record
+                                        $stmt = $pdo->prepare("
+                                            INSERT INTO student_course_completion 
+                                            (student_id, subject_id, year_level, semester, academic_year, grade, status, date_completed)
+                                            VALUES (?, ?, ?, ?, ?, ?, 'completed', CURDATE())
+                                        ");
+                                        $stmt->execute([$student_id, $subject_id_val, $year_level, $semester, $academic_year, $grade_numeric]);
+                                    }
+                                    
+                                    $success_count++;
+                                }
+                                
+                                fclose($file);
+                                $pdo->commit();
+                                
+                                $upload_type_name = '';
+                                if ($upload_type === 'section' && $section_info) {
+                                    $upload_type_name = "section {$section_info['section_code']}";
+                                } elseif ($upload_type === 'subject' && $subject_info) {
+                                    $upload_type_name = "subject {$subject_info['subject_code']} - {$subject_info['subject_name']}";
+                                } else {
+                                    $upload_type_name = "custom list";
+                                }
+                                
+                                logActivity($_SESSION['user_id'], 'Grades Uploaded (Bulk)', 
+                                    "Uploaded grades for {$upload_type_name}: {$success_count} successful, {$error_count} failed");
+                                
+                                echo json_encode([
+                                    'success' => true,
+                                    'message' => "Grades uploaded successfully for {$upload_type_name}!",
+                                    'details' => "✅ {$success_count} grades saved",
+                                    'errors' => $errors,
+                                    'success_count' => $success_count,
+                                    'error_count' => $error_count
+                                ]);
+                                
+                            } catch (Exception $e) {
+                                if ($pdo->inTransaction()) $pdo->rollBack();
+                                fclose($file);
+                                echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
+                            }
+                            exit;
+                            break;
+
+                        case 'get_students_by_section':
+                            $section_id = intval($_GET['section_id'] ?? 0);
+                            
+                            if ($section_id <= 0) {
+                                echo json_encode(['success' => false, 'message' => 'Invalid section ID']);
+                                exit;
+                            }
+                            
+                            try {
+                                $stmt = $pdo->prepare("
+                                    SELECT u.user_id, u.name, si.program, si.year_level
+                                    FROM student_sections ss
+                                    JOIN users u ON ss.student_id = u.user_id
+                                    JOIN students_info si ON u.user_id = si.user_id
+                                    WHERE ss.section_id = ? AND u.role = 'student'
+                                    ORDER BY u.name
+                                ");
+                                $stmt->execute([$section_id]);
+                                $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                                
+                                echo json_encode(['success' => true, 'students' => $students]);
+                                exit;
+                            } catch (Exception $e) {
+                                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+                                exit;
+                            }
+                            break;
+
+case 'get_transfer_curriculum_comparison':
+    $student_id = $_GET['student_id'] ?? '';
+    $course_id = intval($_GET['course_id'] ?? 0);
+    
+    if (empty($student_id) || $course_id <= 0) {
+        echo json_encode(['success' => false, 'message' => 'Invalid parameters']);
+        exit;
+    }
+    
+    try {
+        // Get student's completed subjects from current course
+        $stmt = $pdo->prepare("
+            SELECT scc.*, s.subject_code, s.subject_name, s.units
+            FROM student_course_completion scc
+            JOIN subjects s ON scc.subject_id = s.id
+            WHERE scc.student_id = ? AND scc.status = 'completed'
+        ");
+        $stmt->execute([$student_id]);
+        $completed_subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Also get previous completions
+        $stmt = $pdo->prepare("
+            SELECT spc.*, s.subject_code, s.subject_name, s.units
+            FROM student_previous_completions spc
+            JOIN subjects s ON spc.subject_id = s.id
+            WHERE spc.student_id = ?
+        ");
+        $stmt->execute([$student_id]);
+        $previous_completions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Merge all completed subjects
+        $all_completed = array_merge($completed_subjects, $previous_completions);
+        
+        // Get new course curriculum
+        $stmt = $pdo->prepare("
+            SELECT cc.*, s.subject_code, s.subject_name, s.units
+            FROM course_curriculum cc
+            JOIN subjects s ON cc.subject_id = s.id
+            WHERE cc.course_id = ?
+        ");
+        $stmt->execute([$course_id]);
+        $new_curriculum = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Create lookup for new curriculum subjects by code and name
+        $new_subjects_by_code = [];
+        $new_subjects_by_name = [];
+        foreach ($new_curriculum as $subject) {
+            $new_subjects_by_code[strtoupper(trim($subject['subject_code']))] = $subject;
+            $new_subjects_by_name[strtolower(trim($subject['subject_name']))] = $subject;
+        }
+        
+        // Determine which subjects can be credited
+        $creditable_subjects = [];
+        $creditable_count = 0;
+        
+        foreach ($all_completed as $completed) {
+            $can_credit = false;
+            $equivalent = null;
+            
+            // Try to match by subject code
+            $code_key = strtoupper(trim($completed['subject_code']));
+            if (isset($new_subjects_by_code[$code_key])) {
+                $can_credit = true;
+                $equivalent = $new_subjects_by_code[$code_key];
+            } 
+            // Try to match by subject name
+            else {
+                $name_key = strtolower(trim($completed['subject_name']));
+                foreach ($new_subjects_by_name as $name => $subject) {
+                    // Check for similar names (basic matching)
+                    if (strpos($name_key, strtolower(trim($subject['subject_name']))) !== false || 
+                        strpos(strtolower(trim($subject['subject_name'])), $name_key) !== false) {
+                        $can_credit = true;
+                        $equivalent = $subject;
+                        break;
+                    }
+                }
+            }
+            
+            $creditable_subjects[] = [
+                'completed_id' => $completed['subject_id'],
+                'completed_code' => $completed['subject_code'],
+                'completed_name' => $completed['subject_name'],
+                'grade' => $completed['grade'],
+                'completed_units' => $completed['units'],
+                'equivalent_id' => $equivalent ? $equivalent['subject_id'] : null,
+                'equivalent_code' => $equivalent ? $equivalent['subject_code'] : null,
+                'equivalent_name' => $equivalent ? $equivalent['subject_name'] : null,
+                'can_credit' => $can_credit
+            ];
+            
+            if ($can_credit) $creditable_count++;
+        }
+        
+        echo json_encode([
+            'success' => true,
+            'creditable_subjects' => $creditable_subjects,
+            'completed_count' => count($all_completed),
+            'creditable_count' => $creditable_count,
+            'remaining_count' => count($new_curriculum) - $creditable_count
+        ]);
+        exit;
+        
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        exit;
+    }
+    break;
+    
+    case 'transfer_student':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            echo json_encode(['success' => false, 'message' => 'Invalid request method']);
+            exit;
+        }
+        
+        $student_id = sanitizeInput($_POST['student_id'] ?? '');
+        $to_course_id = intval($_POST['to_course_id'] ?? 0);
+        $year_level = intval($_POST['year_level'] ?? 1);
+        $reason = sanitizeInput($_POST['reason'] ?? '');
+        
+        if (empty($student_id) || $to_course_id <= 0) {
+            echo json_encode(['success' => false, 'message' => 'Missing required fields']);
+            exit;
+        }
+        
+        try {
+            $pdo->beginTransaction();
+            
+            // Get current student info
+            $stmt = $pdo->prepare("SELECT program, year_level, course_id FROM students_info WHERE user_id = ?");
+            $stmt->execute([$student_id]);
+            $student = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            // Get current course info
+            $stmt = $pdo->prepare("SELECT id, course_code, course_name FROM courses WHERE id = ?");
+            $stmt->execute([$student['course_id']]);
+            $from_course = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            // Get new course info
+            $stmt = $pdo->prepare("SELECT id, course_code, course_name FROM courses WHERE id = ?");
+            $stmt->execute([$to_course_id]);
+            $to_course = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            // 1. Save current subjects as completed records
+            $stmt = $pdo->prepare("
+                SELECT DISTINCT s.id, s.subject_code, s.subject_name, s.units, 
+                       sec.year_level as section_year, sec.semester as section_semester 
+                FROM student_sections ss 
+                JOIN sections sec ON ss.section_id = sec.id 
+                JOIN subject_sections subsec ON sec.id = subsec.section_id 
+                JOIN subjects s ON subsec.subject_id = s.id 
+                WHERE ss.student_id = ?
+            ");
+            $stmt->execute([$student_id]);
+            $current_subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            $academic_year_val = date('Y') . '-' . (date('Y') + 1);
+            foreach ($current_subjects as $subject) {
+                $stmt = $pdo->prepare("
+                    INSERT INTO student_course_completion 
+                    (student_id, subject_id, course_id, year_level, semester, academic_year, status, date_completed) 
+                    VALUES (?, ?, ?, ?, ?, ?, 'completed', NOW()) 
+                    ON DUPLICATE KEY UPDATE status = 'completed', date_completed = NOW()
+                ");
+                $stmt->execute([
+                    $student_id, 
+                    $subject['id'], 
+                    $from_course['id'] ?? null, 
+                    $subject['section_year'] ?? $student['year_level'], 
+                    $subject['section_semester'] ?? '1st', 
+                    $academic_year_val
+                ]);
+            }
+            
+            // 2. Mark current enrollment as transferred
+            $stmt = $pdo->prepare("
+                UPDATE student_course_enrollment 
+                SET status = 'transferred', actual_graduation = NOW() 
+                WHERE student_id = ? AND status = 'active'
+            ");
+            $stmt->execute([$student_id]);
+            
+            // 3. Record transfer
+            $stmt = $pdo->prepare("
+                INSERT INTO student_course_transfers 
+                (student_id, from_course_id, to_course_id, from_course_code, to_course_code, 
+                 from_course_name, to_course_name, transfer_date, reason, approved_by, year_level_at_transfer) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?)
+            ");
+            $stmt->execute([
+                $student_id, 
+                $from_course['id'] ?? null, 
+                $to_course_id, 
+                $from_course['course_code'] ?? null, 
+                $to_course['course_code'], 
+                $from_course['course_name'] ?? null, 
+                $to_course['course_name'], 
+                $reason, 
+                $_SESSION['user_id'], 
+                $year_level
+            ]);
+            
+            // 4. REMOVE all current sections
+            $stmt = $pdo->prepare("DELETE FROM student_sections WHERE student_id = ?");
+            $stmt->execute([$student_id]);
+            
+            // 5. Create new enrollment
+            $stmt = $pdo->prepare("
+                INSERT INTO student_course_enrollment 
+                (student_id, course_id, enrollment_date, status, current_year_level) 
+                VALUES (?, ?, NOW(), 'active', ?)
+            ");
+            $stmt->execute([$student_id, $to_course_id, $year_level]);
+            
+            // 6. UPDATE student info with NEW program
+            $stmt = $pdo->prepare("
+                UPDATE students_info 
+                SET course_id = ?, 
+                    program = ?, 
+                    year_level = ?, 
+                    student_type = 'irregular' 
+                WHERE user_id = ?
+            ");
+            $stmt->execute([$to_course_id, $to_course['course_name'], $year_level, $student_id]);
+            
+            $pdo->commit();
+            
+            echo json_encode(['success' => true, 'message' => 'Student successfully transferred to ' . $to_course['course_name']]);
+            exit;
+            
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            exit;
+        }
+        break;
+
+        case 'get_student_full_info':
+            $student_id = $_GET['student_id'] ?? '';
+            
+            if (empty($student_id)) {
+                echo json_encode(['success' => false, 'message' => 'Student ID required']);
+                exit;
+            }
+            
+            try {
+                $pdo = getDBConnection();
+                
+                // Get student current info
+                $stmt = $pdo->prepare("
+                    SELECT program, year_level, course_id 
+                    FROM students_info 
+                    WHERE user_id = ?
+                ");
+                $stmt->execute([$student_id]);
+                $student = $stmt->fetch(PDO::FETCH_ASSOC);
+                
+                // Check if student has transfer history
+                $stmt = $pdo->prepare("
+                    SELECT from_course_code, to_course_code, transfer_date 
+                    FROM student_course_transfers 
+                    WHERE student_id = ? 
+                    ORDER BY transfer_date DESC 
+                    LIMIT 1
+                ");
+                $stmt->execute([$student_id]);
+                $last_transfer = $stmt->fetch(PDO::FETCH_ASSOC);
+                
+                $has_transferred = !empty($last_transfer);
+                
+                echo json_encode([
+                    'success' => true,
+                    'current_program' => $student['program'] ?? '',
+                    'year_level' => $student['year_level'] ?? 1,
+                    'has_transferred' => $has_transferred,
+                    'original_program' => $last_transfer['from_course_code'] ?? null,
+                    'transfer_date' => $last_transfer['transfer_date'] ?? null
+                ]);
+                exit;
+                
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+                exit;
+            }
+            break;
+
+    case 'get_student_current_course':
+        $student_id = $_GET['student_id'] ?? '';
+        
+        if (empty($student_id)) {
+            echo json_encode(['success' => false, 'message' => 'Student ID required']);
+            exit;
+        }
+        
+        try {
+            $stmt = $pdo->prepare("
+                SELECT course_id FROM students_info WHERE user_id = ?
+            ");
+            $stmt->execute([$student_id]);
+            $course_id = $stmt->fetchColumn();
+            
+            echo json_encode(['success' => true, 'course_id' => $course_id]);
+            exit;
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            exit;
+        }
+        break;
 
         case 'remove_curriculum':
             $curriculum_id = intval($_POST['curriculum_id'] ?? 0);

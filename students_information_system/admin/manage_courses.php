@@ -466,26 +466,59 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 }
 
-// Get all courses with calculated totals
-$courses = $pdo->query("SELECT c.*, 
-                        COUNT(DISTINCT cc.id) as subject_count,
-                        COUNT(DISTINCT sce.student_id) as student_count
-                        FROM courses c
-                        LEFT JOIN course_curriculum cc ON c.id = cc.course_id
-                        LEFT JOIN student_course_enrollment sce ON c.id = sce.course_id AND sce.status = 'active'
-                        GROUP BY c.id
-                        ORDER BY c.course_code")->fetchAll(PDO::FETCH_ASSOC);
+// =======================================================
+// COURSES PAGINATION
+// =======================================================
+$courses_page = isset($_GET['courses_page']) ? max(1, intval($_GET['courses_page'])) : 1;
+$courses_per_page = isset($_GET['courses_per_page']) ? intval($_GET['courses_per_page']) : 15;
+$courses_per_page = in_array($courses_per_page, [10, 15, 25, 50]) ? $courses_per_page : 15;
+$courses_offset = ($courses_page - 1) * $courses_per_page;
 
-$subjects = $pdo->query("SELECT s.* FROM subjects s ORDER BY s.subject_code")->fetchAll(PDO::FETCH_ASSOC);
 
-$sections = $pdo->query("
+$courses_total = $pdo->query("SELECT COUNT(*) FROM courses")->fetchColumn();
+$courses_total_pages = ceil($courses_total / $courses_per_page);
+
+$courses_sql = "SELECT c.*, 
+                COUNT(DISTINCT cc.id) as subject_count,
+                COUNT(DISTINCT sce.student_id) as student_count
+                FROM courses c
+                LEFT JOIN course_curriculum cc ON c.id = cc.course_id
+                LEFT JOIN student_course_enrollment sce ON c.id = sce.course_id AND sce.status = 'active'
+                GROUP BY c.id
+                ORDER BY c.course_code
+                LIMIT " . intval($courses_per_page) . " OFFSET " . intval($courses_offset);
+$courses = $pdo->query($courses_sql)->fetchAll(PDO::FETCH_ASSOC);
+
+
+$subjects_page = isset($_GET['subjects_page']) ? max(1, intval($_GET['subjects_page'])) : 1;
+$subjects_per_page = isset($_GET['subjects_per_page']) ? intval($_GET['subjects_per_page']) : 15;
+$subjects_per_page = in_array($subjects_per_page, [10, 15, 25, 50]) ? $subjects_per_page : 15;
+$subjects_offset = ($subjects_page - 1) * $subjects_per_page;
+
+$subjects_total = $pdo->query("SELECT COUNT(*) FROM subjects")->fetchColumn();
+$subjects_total_pages = ceil($subjects_total / $subjects_per_page);
+
+$subjects_sql = "SELECT s.* FROM subjects s ORDER BY s.subject_code LIMIT " . intval($subjects_per_page) . " OFFSET " . intval($subjects_offset);
+$subjects = $pdo->query($subjects_sql)->fetchAll(PDO::FETCH_ASSOC);
+
+
+$sections_page = isset($_GET['sections_page']) ? max(1, intval($_GET['sections_page'])) : 1;
+$sections_per_page = isset($_GET['sections_per_page']) ? intval($_GET['sections_per_page']) : 15;
+$sections_per_page = in_array($sections_per_page, [10, 15, 25, 50]) ? $sections_per_page : 15;
+$sections_offset = ($sections_page - 1) * $sections_per_page;
+
+$sections_total = $pdo->query("SELECT COUNT(*) FROM sections")->fetchColumn();
+$sections_total_pages = ceil($sections_total / $sections_per_page);
+
+$sections_sql = "
     SELECT s.*, c.course_code, c.course_name,
         (SELECT COUNT(*) FROM student_sections ss WHERE ss.section_id = s.id) as student_count,
         (SELECT COUNT(*) FROM subject_sections ss WHERE ss.section_id = s.id) as subject_count
     FROM sections s
     LEFT JOIN courses c ON s.course_id = c.id
     ORDER BY s.year_level, s.section_code
-")->fetchAll(PDO::FETCH_ASSOC);
+    LIMIT " . intval($sections_per_page) . " OFFSET " . intval($sections_offset);
+$sections = $pdo->query($sections_sql)->fetchAll(PDO::FETCH_ASSOC);
 
 $programs = $pdo->query("SELECT DISTINCT program FROM subjects WHERE program IS NOT NULL AND program != '' ORDER BY program")->fetchAll(PDO::FETCH_COLUMN);
 if (empty($programs)) {
@@ -747,6 +780,37 @@ renderPageStart('Manage Courses', 'admin', 'manage_courses.php');
                     </tbody>
                 </table>
             </div>
+            <!-- Courses Pagination -->
+<?php if ($courses_total_pages > 1): ?>
+<div class="d-flex justify-content-between align-items-center mt-3 flex-wrap">
+    <div class="text-muted small mb-2 mb-md-0">
+        Showing <?php echo $courses_offset + 1; ?> to <?php echo min($courses_offset + $courses_per_page, $courses_total); ?> of <?php echo $courses_total; ?> courses
+    </div>
+    <div>
+        <div class="d-flex align-items-center gap-2">
+            <label class="text-muted small">Show:</label>
+            <select class="form-select form-select-sm" style="width: auto;" onchange="window.location.href=updateUrlParam('courses_per_page', this.value)">
+                <?php foreach([10, 15, 25, 50] as $opt): ?>
+                    <option value="<?php echo $opt; ?>" <?php echo $courses_per_page == $opt ? 'selected' : ''; ?>><?php echo $opt; ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <ul class="pagination pagination-sm mt-2 mt-md-0">
+            <li class="page-item <?php echo $courses_page <= 1 ? 'disabled' : ''; ?>">
+                <a class="page-link" href="?courses_page=<?php echo $courses_page - 1; ?>&courses_per_page=<?php echo $courses_per_page; ?>">&laquo;</a>
+            </li>
+            <?php for($i = max(1, $courses_page - 2); $i <= min($courses_total_pages, $courses_page + 2); $i++): ?>
+                <li class="page-item <?php echo $i == $courses_page ? 'active' : ''; ?>">
+                    <a class="page-link" href="?courses_page=<?php echo $i; ?>&courses_per_page=<?php echo $courses_per_page; ?>"><?php echo $i; ?></a>
+                </li>
+            <?php endfor; ?>
+            <li class="page-item <?php echo $courses_page >= $courses_total_pages ? 'disabled' : ''; ?>">
+                <a class="page-link" href="?courses_page=<?php echo $courses_page + 1; ?>&courses_per_page=<?php echo $courses_per_page; ?>">&raquo;</a>
+            </li>
+        </ul>
+    </div>
+</div>
+<?php endif; ?>
         </div>
 
         <!-- Subjects Tab -->
@@ -814,16 +878,52 @@ renderPageStart('Manage Courses', 'admin', 'manage_courses.php');
                     </tbody>
                 </table>
             </div>
+            <!-- Subjects Pagination -->
+<?php if ($subjects_total_pages > 1): ?>
+<div class="d-flex justify-content-between align-items-center mt-3 flex-wrap">
+    <div class="text-muted small mb-2 mb-md-0">
+        Showing <?php echo $subjects_offset + 1; ?> to <?php echo min($subjects_offset + $subjects_per_page, $subjects_total); ?> of <?php echo $subjects_total; ?> subjects
+    </div>
+    <div>
+        <div class="d-flex align-items-center gap-2">
+            <label class="text-muted small">Show:</label>
+            <select class="form-select form-select-sm" style="width: auto;" onchange="window.location.href=updateUrlParam('subjects_per_page', this.value)">
+                <?php foreach([10, 15, 25, 50] as $opt): ?>
+                    <option value="<?php echo $opt; ?>" <?php echo $subjects_per_page == $opt ? 'selected' : ''; ?>><?php echo $opt; ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <ul class="pagination pagination-sm mt-2 mt-md-0">
+            <li class="page-item <?php echo $subjects_page <= 1 ? 'disabled' : ''; ?>">
+                <a class="page-link" href="?subjects_page=<?php echo $subjects_page - 1; ?>&subjects_per_page=<?php echo $subjects_per_page; ?>">&laquo;</a>
+            </li>
+            <?php for($i = max(1, $subjects_page - 2); $i <= min($subjects_total_pages, $subjects_page + 2); $i++): ?>
+                <li class="page-item <?php echo $i == $subjects_page ? 'active' : ''; ?>">
+                    <a class="page-link" href="?subjects_page=<?php echo $i; ?>&subjects_per_page=<?php echo $subjects_per_page; ?>"><?php echo $i; ?></a>
+                </li>
+            <?php endfor; ?>
+            <li class="page-item <?php echo $subjects_page >= $subjects_total_pages ? 'disabled' : ''; ?>">
+                <a class="page-link" href="?subjects_page=<?php echo $subjects_page + 1; ?>&subjects_per_page=<?php echo $subjects_per_page; ?>">&raquo;</a>
+            </li>
+        </ul>
+    </div>
+</div>
+<?php endif; ?>
         </div>
 
         <!-- Sections Tab -->
         <div class="tab-pane fade" id="sections" role="tabpanel">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5>Section Management</h5>
-                <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#addSectionModal">
-                    <i class="fas fa-plus"></i> Add Section
-                </button>
-            </div>
+<div class="d-flex justify-content-between align-items-center mb-3">
+<h5>Section Management</h5>
+<div>
+    <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#bulkSectionGradeModal">
+        <i class="fas fa-upload"></i> Bulk Upload Grades
+    </button>
+    <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#addSectionModal">
+        <i class="fas fa-plus"></i> Add Section
+    </button>
+</div>
+</div>
             
             <div class="table-responsive">
                 <table class="table table-striped table-hover">
@@ -903,6 +1003,37 @@ renderPageStart('Manage Courses', 'admin', 'manage_courses.php');
                     </tbody>
                 </table>
             </div>
+            <!-- Sections Pagination -->
+<?php if ($sections_total_pages > 1): ?>
+<div class="d-flex justify-content-between align-items-center mt-3 flex-wrap">
+    <div class="text-muted small mb-2 mb-md-0">
+        Showing <?php echo $sections_offset + 1; ?> to <?php echo min($sections_offset + $sections_per_page, $sections_total); ?> of <?php echo $sections_total; ?> sections
+    </div>
+    <div>
+        <div class="d-flex align-items-center gap-2">
+            <label class="text-muted small">Show:</label>
+            <select class="form-select form-select-sm" style="width: auto;" onchange="window.location.href=updateUrlParam('sections_per_page', this.value)">
+                <?php foreach([10, 15, 25, 50] as $opt): ?>
+                    <option value="<?php echo $opt; ?>" <?php echo $sections_per_page == $opt ? 'selected' : ''; ?>><?php echo $opt; ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <ul class="pagination pagination-sm mt-2 mt-md-0">
+            <li class="page-item <?php echo $sections_page <= 1 ? 'disabled' : ''; ?>">
+                <a class="page-link" href="?sections_page=<?php echo $sections_page - 1; ?>&sections_per_page=<?php echo $sections_per_page; ?>">&laquo;</a>
+            </li>
+            <?php for($i = max(1, $sections_page - 2); $i <= min($sections_total_pages, $sections_page + 2); $i++): ?>
+                <li class="page-item <?php echo $i == $sections_page ? 'active' : ''; ?>">
+                    <a class="page-link" href="?sections_page=<?php echo $i; ?>&sections_per_page=<?php echo $sections_per_page; ?>"><?php echo $i; ?></a>
+                </li>
+            <?php endfor; ?>
+            <li class="page-item <?php echo $sections_page >= $sections_total_pages ? 'disabled' : ''; ?>">
+                <a class="page-link" href="?sections_page=<?php echo $sections_page + 1; ?>&sections_per_page=<?php echo $sections_per_page; ?>">&raquo;</a>
+            </li>
+        </ul>
+    </div>
+</div>
+<?php endif; ?>
         </div>
 
 <!-- Curriculum Tab -->
@@ -1107,8 +1238,91 @@ renderPageStart('Manage Courses', 'admin', 'manage_courses.php');
 </div>
 
 <!-- =======================================================
-    MODALS (All modals remain the same as your original)
+    MODALS
 ======================================================= -->
+
+
+<!-- Bulk Grade Upload by Section Modal -->
+<div class="modal fade" id="bulkSectionGradeModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="fas fa-file-csv me-2"></i>Bulk Grade Upload by Section</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info small">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>CSV Format Instructions (By Section):</strong><br>
+                    - <strong>Column A:</strong> Student ID<br>
+                    - <strong>Column B:</strong> Student Name<br>
+                    - <strong>Column C:</strong> Subject Code<br>
+                    - <strong>Column D:</strong> Grade<br>
+                    - <strong>Column E:</strong> Subject Name (optional, for reference)<br>
+                    - <strong>Column F:</strong> Year Level (optional)<br>
+                    - <strong>Column G:</strong> Semester (optional, default: 1st)<br>
+                    <a href="#" id="downloadSectionCsvTemplate" class="mt-2 d-inline-block">
+                        <i class="fas fa-download me-1"></i> Download BSCS 1A Grade Sheet Template
+                    </a>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Select Section <span class="text-danger">*</span></label>
+                        <select class="form-select" id="bulk_section_id" required>
+                            <option value="">-- Select Section --</option>
+                            <?php
+                            $sections_list = $pdo->query("
+                                SELECT s.id, s.section_code, s.program, s.year_level, s.semester,
+                                       CONCAT(s.section_code, ' - ', s.program, ' (Year ', s.year_level, ' ', s.semester, ' Semester)') AS section_label
+                                FROM sections s
+                                WHERE s.status = 'active'
+                                ORDER BY s.program, s.year_level, s.section_code
+                            ")->fetchAll();
+                            foreach ($sections_list as $sec):
+                            ?>
+                                <option value="<?php echo $sec['id']; ?>" data-code="<?php echo htmlspecialchars($sec['section_code']); ?>" data-program="<?php echo htmlspecialchars($sec['program']); ?>" data-year="<?php echo $sec['year_level']; ?>">
+                                    <?php echo htmlspecialchars($sec['section_label']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-text" id="selectedSectionInfo"></div>
+                    </div>
+                </div>
+                
+                <form id="sectionGradeUploadForm" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
+                    <input type="hidden" name="action" value="upload_section_grades_csv">
+                    
+                    <div class="row align-items-end">
+                        <div class="col-md-8">
+                            <label class="form-label">Select CSV File</label>
+                            <input type="file" class="form-control" id="section_csv_file" name="csv_file" accept=".csv" required>
+                            <div class="form-text">Maximum file size: 5MB. Only .csv files accepted.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <button type="submit" class="btn btn-success w-100" id="uploadSectionGradesBtn">
+                                <i class="fas fa-upload me-1"></i> Upload & Process
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="sectionUploadProgress" style="display: none;" class="mt-3">
+                        <div class="progress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                        </div>
+                        <p class="small text-muted mt-1" id="sectionUploadStatus">Processing...</p>
+                    </div>
+                </form>
+                
+                <div id="sectionUploadResult" class="mt-3" style="display: none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- Add Course Modal -->
 <div class="modal fade" id="addCourseModal" tabindex="-1">
@@ -2309,6 +2523,232 @@ function showToast(message, type = 'success') {
     // Simple alert for now, but you can implement a nice toast
     showMessage(message);
 }
+
+// ====================================================
+// SECTION-BASED GRADE UPLOAD FUNCTIONS
+// ====================================================
+
+// Show section info when selected
+document.getElementById('bulk_section_id')?.addEventListener('change', function() {
+    const selectedOption = this.options[this.selectedIndex];
+    const sectionCode = selectedOption.dataset.code || '';
+    const program = selectedOption.dataset.program || '';
+    const yearLevel = selectedOption.dataset.year || '';
+    
+    const infoDiv = document.getElementById('selectedSectionInfo');
+    if (sectionCode) {
+        infoDiv.innerHTML = `<span class="text-success"><i class="fas fa-check-circle me-1"></i> Selected: ${sectionCode} - ${program} (Year ${yearLevel})</span>`;
+    } else {
+        infoDiv.innerHTML = '';
+    }
+});
+
+// Download CSV Template for selected section
+document.getElementById('downloadSectionCsvTemplate')?.addEventListener('click', function(e) {
+    e.preventDefault();
+    downloadSectionCsvTemplate();
+});
+
+function downloadSectionCsvTemplate() {
+    const sectionSelect = document.getElementById('bulk_section_id');
+    const selectedOption = sectionSelect.options[sectionSelect.selectedIndex];
+    const sectionId = sectionSelect.value;
+    const sectionCode = selectedOption.dataset?.code || '';
+    const program = selectedOption.dataset?.program || '';
+    const yearLevel = selectedOption.dataset?.year || 1;
+    
+    if (!sectionId) {
+        alert('Please select a section first');
+        return;
+    }
+    
+    // Fetch students in this section
+    fetch(`ajax_handler.php?action=get_students_by_section&section_id=${sectionId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.students.length > 0) {
+                generateSectionCsv(data.students, sectionCode, program, yearLevel);
+            } else {
+                alert('No students found in this section');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error loading students');
+        });
+}
+
+function generateSectionCsv(students, sectionCode, program, yearLevel) {
+    // Get subjects for this section
+    fetch(`ajax_handler.php?action=get_section_assigned_subjects&section_id=${document.getElementById('bulk_section_id').value}`)
+        .then(response => response.json())
+        .then(data => {
+            const subjects = data.subjects || [];
+            
+            if (subjects.length === 0) {
+                alert('No subjects assigned to this section');
+                return;
+            }
+            
+            // CSV Headers
+            const headers = ['Student ID', 'Student Name', 'Subject Code', 'Grade', 'Subject Name', 'Year Level', 'Semester'];
+            
+            // Build CSV rows
+            const rows = [];
+            
+            students.forEach(student => {
+                subjects.forEach(subject => {
+                    rows.push([
+                        student.user_id,
+                        student.name,
+                        subject.subject_code,
+                        '', // Grade column - empty for teacher to fill
+                        subject.subject_name,
+                        yearLevel,
+                        '1st'
+                    ]);
+                });
+            });
+            
+            // Create CSV content
+            let csvContent = headers.join(',') + '\n';
+            rows.forEach(row => {
+                csvContent += row.map(cell => `"${cell}"`).join(',') + '\n';
+            });
+            
+            // Download file
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${sectionCode}_grade_sheet.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            alert(`Template downloaded! Fill in the grades for ${students.length} students and ${subjects.length} subjects.`);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error loading subjects');
+        });
+}
+
+// Upload section grades
+async function uploadSectionGrades() {
+    const form = document.getElementById('sectionGradeUploadForm');
+    const fileInput = document.getElementById('section_csv_file');
+    const sectionId = document.getElementById('bulk_section_id').value;
+    const progressDiv = document.getElementById('sectionUploadProgress');
+    const progressBar = progressDiv.querySelector('.progress-bar');
+    const statusText = document.getElementById('sectionUploadStatus');
+    const resultDiv = document.getElementById('sectionUploadResult');
+    const uploadBtn = document.getElementById('uploadSectionGradesBtn');
+    
+    if (!sectionId) {
+        alert('Please select a section');
+        return;
+    }
+    
+    if (!fileInput.files.length) {
+        alert('Please select a CSV file');
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+        alert('Please upload a valid CSV file');
+        return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) {
+        alert('File size exceeds 5MB limit');
+        return;
+    }
+    
+    // Show progress
+    progressDiv.style.display = 'block';
+    progressBar.style.width = '0%';
+    statusText.textContent = 'Uploading file...';
+    uploadBtn.disabled = true;
+    resultDiv.style.display = 'none';
+    
+    const formData = new FormData(form);
+    formData.append('section_id', sectionId);
+    
+    // Simulate progress
+    let progress = 0;
+    const interval = setInterval(() => {
+        progress += 10;
+        if (progress <= 90) {
+            progressBar.style.width = progress + '%';
+        }
+    }, 200);
+    
+    try {
+        const response = await fetch('ajax_handler.php', {
+            method: 'POST',
+            body: formData
+        });
+        
+        clearInterval(interval);
+        
+        const result = await response.json();
+        
+        progressBar.style.width = '100%';
+        
+        if (result.success) {
+            statusText.textContent = 'Processing complete!';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    <strong>Success!</strong> ${result.message}<br>
+                    <small>${result.details || ''}</small>
+                    ${result.errors && result.errors.length > 0 ? 
+                        '<br><br><strong>Warnings/Errors:</strong><ul class="mb-0">' + 
+                        result.errors.map(e => `<li class="small">${escapeHtml(e)}</li>`).join('') + 
+                        '</ul>' : ''}
+                </div>
+            `;
+        } else {
+            statusText.textContent = 'Upload failed';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Error!</strong> ${escapeHtml(result.message)}
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Upload error:', error);
+        statusText.textContent = 'Upload failed';
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                <strong>Error!</strong> Network error. Please try again.
+            </div>
+        `;
+    } finally {
+        setTimeout(() => {
+            progressBar.style.width = '0%';
+            progressDiv.style.display = 'none';
+        }, 3000);
+        uploadBtn.disabled = false;
+        fileInput.value = '';
+    }
+}
+
+// Add event listener for the upload form
+document.getElementById('sectionGradeUploadForm')?.addEventListener('submit', function(e) {
+    e.preventDefault();
+    uploadSectionGrades();
+});
+
+// Also add the AJAX handler for get_students_by_section to ajax_handler.php
 // ====================================================
 // STUDENT ASSIGNMENT
 // ====================================================
@@ -2391,6 +2831,13 @@ function loadStudentsForAssignmentDynamic() {
             }
         })
         .catch(error => console.error('Error loading students:', error));
+}
+
+// Helper function to update URL parameters
+function updateUrlParam(key, value) {
+    const url = new URL(window.location.href);
+    url.searchParams.set(key, value);
+    window.location.href = url.toString();
 }
 
 function renderStudentTableDynamic(modalDiv, students) {

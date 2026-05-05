@@ -338,41 +338,6 @@ renderPageStart('My Profile', 'registrar', 'profile.php');
                 </div>
             </div>
             
-            <!-- Change Password Card -->
-            <div class="card profile-card">
-                <div class="card-header bg-white border-bottom">
-                    <h5 class="mb-0"><i class="fas fa-key me-2"></i>Change Password</h5>
-                </div>
-                <div class="card-body">
-                    <form method="POST">
-                        <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
-                        <input type="hidden" name="action" value="change_password">
-                        
-                        <div class="mb-3">
-                            <label class="form-label">Current Password</label>
-                            <input type="password" class="form-control" name="current_password" required>
-                        </div>
-                        
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label class="form-label">New Password</label>
-                                <input type="password" class="form-control" name="new_password" minlength="6" required>
-                                <div class="form-text">Minimum 6 characters</div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Confirm New Password</label>
-                                <input type="password" class="form-control" name="confirm_password" minlength="6" required>
-                            </div>
-                        </div>
-                        
-                        <div class="mt-3">
-                            <button type="submit" class="btn btn-warning">
-                                <i class="fas fa-key me-2"></i>Change Password
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
             
             <!-- Account Information Card -->
             <div class="card profile-card mt-4">

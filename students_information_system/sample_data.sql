@@ -9,12 +9,12 @@
 -- =======================================================
 
 INSERT INTO users (user_id, name, email, password, role, user_status, created_at) VALUES
-('ADMIN001', 'Dr. Maria Santos', 'admin@university.edu.ph', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', 'active', '2022-01-15 09:00:00'),
-('CASH001', 'John Reynald Cruz', 'cashier@university.edu.ph', '$2y$10$WY7QF5Wqf5b3zUXFQgwz4uFpOVk5XQZ7tqKzZpGZh8Xx9tJvXKbUy', 'cashier', 'active', '2022-01-15 09:30:00'),
-('REG001', 'Sarah Jane Martinez', 'registrar@university.edu.ph', '$2y$10$JK1pZ5jLqX8fLmN2oP3rQeT5vW7yX9zA1bC3dE5fG6hJ8kL0mN4p', 'registrar', 'active', '2022-01-15 10:00:00');
+('ADMIN001', 'Roy Impreial', 'admin@university.edu.ph', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', 'active', '2022-01-15 09:00:00'),
+('CASH001', 'John Reynald Cruz', 'cashier@university.edu.ph', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'cashier', 'active', '2022-01-15 09:30:00'),
+('REG001', 'Sarah Jane Martinez', 'registrar@university.edu.ph', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'registrar', 'active', '2022-01-15 10:00:00');
 
 INSERT INTO employee_info (user_id, name, email, number, role, created_at) VALUES
-('ADMIN001', 'Dr. Maria Santos', 'admin@university.edu.ph', '09171234567', 'System Administrator', '2022-01-15 09:00:00'),
+('ADMIN001', 'Roy Imperial', 'admin@university.edu.ph', '09171234567', 'System Administrator', '2022-01-15 09:00:00'),
 ('CASH001', 'John Reynald Cruz', 'cashier@university.edu.ph', '09171234568', 'Head Cashier', '2022-01-15 09:30:00'),
 ('REG001', 'Sarah Jane Martinez', 'registrar@university.edu.ph', '09171234569', 'Registrar', '2022-01-15 10:00:00');
 

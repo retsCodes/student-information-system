@@ -17,7 +17,6 @@ function getCurrentTheme() {
     return $_SESSION['theme'] ?? 'light';
 }
 
-
 // Theme toggle button HTML
 function getThemeToggleButton() {
     $currentTheme = getCurrentTheme();
@@ -146,8 +145,12 @@ function getThemeCSS() {
         </style>';
     }
     return '';
-    
 }
+
+// =======================================================
+// PAGINATION FUNCTIONS (ONLY ONCE)
+// =======================================================
+
 /**
  * Helper to build URL with preserved query parameters for pagination
  */
@@ -170,7 +173,7 @@ function renderPagination($current_page, $total_pages, $base_url, $params = []) 
         return '';
     }
     
-    $html = '<nav aria-label="Page navigation"><ul class="pagination justify-content-center">';
+    $html = '<nav aria-label="Page navigation"><ul class="pagination justify-content-center flex-wrap">';
     
     // Previous button
     $disabled_prev = ($current_page <= 1) ? 'disabled' : '';
@@ -218,7 +221,105 @@ function renderPagination($current_page, $total_pages, $base_url, $params = []) 
         $next_url
     );
     
-    $html .= '</ul></nav>';
+    $html .= '</ul>';
+    $html .= '<div class="text-center text-muted small mt-2">Page ' . $current_page . ' of ' . $total_pages . '</div>';
+    $html .= '</nav>';
+    
+    return $html;
+}
+
+/**
+ * Simple pagination for smaller datasets
+ */
+function renderSimplePagination($page, $total_pages, $base_url = '') {
+    if ($total_pages <= 1) {
+        return '';
+    }
+    
+    $html = '<div class="d-flex justify-content-between align-items-center mt-3">';
+    $html .= '<div class="btn-group" role="group">';
+    
+    if ($page > 1) {
+        $html .= '<a href="' . $base_url . '?page=' . ($page - 1) . '" class="btn btn-sm btn-outline-primary">&laquo; Previous</a>';
+    } else {
+        $html .= '<button class="btn btn-sm btn-outline-secondary" disabled>&laquo; Previous</button>';
+    }
+    
+    $html .= '<span class="btn btn-sm btn-light disabled">Page ' . $page . ' of ' . $total_pages . '</span>';
+    
+    if ($page < $total_pages) {
+        $html .= '<a href="' . $base_url . '?page=' . ($page + 1) . '" class="btn btn-sm btn-outline-primary">Next &raquo;</a>';
+    } else {
+        $html .= '<button class="btn btn-sm btn-outline-secondary" disabled>Next &raquo;</button>';
+    }
+    
+    $html .= '</div></div>';
+    
+    return $html;
+}
+
+/**
+ * Per-page selector
+ */
+function renderPerPageSelector($current_per_page = 25, $options = [10, 25, 50, 100], $base_url = '', $query_params = []) {
+    if (empty($options)) {
+        $options = [10, 25, 50, 100];
+    }
+    
+    // Remove per_page and page parameters from query params
+    unset($query_params['per_page']);
+    unset($query_params['page']);
+    
+    $query_string = '';
+    if (!empty($query_params)) {
+        $query_string = '&' . http_build_query($query_params);
+    }
+    
+    $html = '<div class="d-flex align-items-center gap-2">';
+    $html .= '<label class="text-muted small mb-0">Show:</label>';
+    $html .= '<select class="form-select form-select-sm" style="width: auto;" onchange="window.location.href=this.value">';
+    
+    foreach ($options as $option) {
+        $selected = ($current_per_page == $option) ? 'selected' : '';
+        $html .= '<option value="' . $base_url . '?per_page=' . $option . $query_string . '" ' . $selected . '>' . $option . '</option>';
+    }
+    
+    $html .= '</select>';
+    $html .= '<span class="text-muted small">per page</span>';
+    $html .= '</div>';
+    
+    return $html;
+}
+
+/**
+ * Complete pagination bar with per-page selector and info
+ */
+function renderFullPagination($page, $total_pages, $total_records, $per_page, $base_url = '', $query_params = []) {
+    if ($total_records <= 0) {
+        return '';
+    }
+    
+    $offset = ($page - 1) * $per_page;
+    $showing_start = $offset + 1;
+    $showing_end = min($offset + $per_page, $total_records);
+    
+    $html = '<div class="row align-items-center mt-3">';
+    $html .= '<div class="col-md-4 mb-2 mb-md-0">';
+    $html .= '<div class="text-muted small">';
+    $html .= 'Showing ' . $showing_start . ' to ' . $showing_end . ' of ' . $total_records . ' entries';
+    $html .= '</div>';
+    $html .= '</div>';
+    
+    $html .= '<div class="col-md-4 mb-2 mb-md-0 d-flex justify-content-center">';
+    $html .= renderPagination($page, $total_pages, $base_url, $query_params);
+    $html .= '</div>';
+    
+    $html .= '<div class="col-md-4 d-flex justify-content-md-end">';
+    $html .= renderPerPageSelector($per_page, [10, 25, 50, 100], $base_url, array_merge($query_params, ['page' => $page]));
+    $html .= '</div>';
+    
+    $html .= '</div>';
+    
     return $html;
 }
 ?>
